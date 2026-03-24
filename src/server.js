@@ -34,6 +34,38 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && requestUrl.pathname === '/webhook') {
+    let rawBody = '';
+
+    req.on('data', (chunk) => {
+      rawBody += chunk;
+    });
+
+    req.on('end', () => {
+      let body;
+
+      try {
+        body = JSON.parse(rawBody || '{}');
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+        return;
+      }
+
+      if (body.object === 'page') {
+        console.log('Incoming webhook event:', JSON.stringify(body));
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('EVENT_RECEIVED');
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unsupported webhook object' }));
+    });
+
+    return;
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not Found' }));
 });
