@@ -5,6 +5,7 @@ const verifyToken = process.env.VERIFY_TOKEN;
 
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${requestUrl.pathname}`);
 
   if (req.method === 'GET' && requestUrl.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
