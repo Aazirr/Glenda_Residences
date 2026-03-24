@@ -47,8 +47,18 @@ const server = http.createServer((req, res) => {
       try {
         body = JSON.parse(rawBody || '{}');
       } catch (error) {
+        console.log('Webhook POST received invalid JSON payload');
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+        return;
+      }
+
+      console.log('Webhook POST received payload keys:', Object.keys(body));
+
+      if (body.sample && body.sample.field) {
+        console.log(`Webhook sample test received for field: ${body.sample.field}`);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('EVENT_RECEIVED');
         return;
       }
 
@@ -59,8 +69,9 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unsupported webhook object' }));
+      console.log('Webhook POST received unsupported payload:', JSON.stringify(body));
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('EVENT_RECEIVED');
     });
 
     return;
