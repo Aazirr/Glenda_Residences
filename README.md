@@ -1,10 +1,10 @@
-# Glenda BH Messenger Bot
+# Glenda BH Telegram Bot
 
-Messenger bot for apartment management at Glenda Residences.
+Telegram bot for apartment management at Glenda Residences.
 
 ## Overview
 
-This service receives Meta webhook events for a Facebook Page and is deployed on Railway.
+This service receives Telegram webhook updates and runs on Railway.
 
 ## Tech Stack
 
@@ -15,46 +15,52 @@ This service receives Meta webhook events for a Facebook Page and is deployed on
 
 Create a `.env` file from `.env.example` and set:
 
-- `PORT` (optional for local use, Railway provides this automatically)
-- `VERIFY_TOKEN`
-- `PAGE_ACCESS_TOKEN`
-- `APP_SECRET`
-- `OWNER_PSID`
+- `PORT` (optional locally, Railway provides this automatically)
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `OWNER_TELEGRAM_ID`
 
-## Available Endpoints
+## Endpoints
+
+- `GET /`
+  - Basic service status.
 
 - `GET /health`
-	- Returns service status JSON.
+  - Health check endpoint.
 
-- `GET /webhook`
-	- Handles Meta webhook verification.
-	- Requires `hub.mode`, `hub.verify_token`, and `hub.challenge` query parameters.
-
-- `POST /webhook`
-	- Receives webhook event payloads.
-	- Responds with `EVENT_RECEIVED`.
+- `POST /telegram/webhook`
+  - Receives Telegram updates.
 
 ## Local Run
 
-1. Install dependencies (if any are added later):
-	 - `npm install`
-2. Start server:
-	 - `npm start`
+1. Start the server:
+   - `npm start`
 
 Default local URL:
 
 - `http://localhost:3000`
 
-## Deployment
+## Railway Deployment
 
-The project is deployed on Railway from GitHub.
+1. Push this repository to GitHub.
+2. Connect the repository in Railway.
+3. Add environment variables in Railway:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_WEBHOOK_SECRET`
+4. Deploy.
 
-Callback URL format for Meta Webhooks:
+## Set Telegram Webhook
 
-- `https://<your-railway-domain>/webhook`
+After deploy, run this in a browser or terminal (replace placeholders):
 
-## Current Development Focus
+`https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<your-railway-domain>/telegram/webhook&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 
-- Webhook connectivity and event handling
-- Owner-only command flow (next)
-- Tenant data capture and billing workflow (next phases)
+Optional verification:
+
+`https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo`
+
+## Current Bot Behavior
+
+- `/start` replies with online status
+- `/ping` replies with `pong`
+- Other text messages are echoed back

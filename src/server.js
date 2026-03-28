@@ -1,7 +1,78 @@
 const http = require('http');
 
 const port = process.env.PORT || 3000;
-const verifyToken = process.env.VERIFY_TOKEN;
+const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+async function sendTelegramMessage(chatId, text) {
+  if (!telegramBotToken) {
+    console.log('TELEGRAM_BOT_TOKEN is not set, skipping reply');
+    return;
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.log(`Telegram sendMessage failed: ${response.status} ${body}`);
+  }
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let rawBody = '';
+
+    req.on('data', (chunk) => {
+      rawBody += chunk;
+    });
+
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(rawBody || '{}'));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+async function handleTelegramUpdate(update) {
+  const message = update.message;
+
+  if (!message || !message.chat || !message.chat.id) {
+    return;
+  }
+
+  const chatId = message.chat.id;
+  const text = (message.text || '').trim();
+
+  if (!text) {
+    return;
+  }
+
+  console.log(`Telegram message from ${chatId}: ${text}`);
+
+  if (text === '/start') {
+    await sendTelegramMessage(chatId, 'Glenda Residences bot is online.');
+    return;
+  }
+
+  if (text === '/ping') {
+    await sendTelegramMessage(chatId, 'pong');
+    return;
+  }
+
+  await sendTelegramMessage(chatId, `Received: ${text}`);
+}
 
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -13,67 +84,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && requestUrl.pathname === '/webhook') {
-    const mode = requestUrl.searchParams.get('hub.mode');
-    const token = requestUrl.searchParams.get('hub.verify_token');
-    const challenge = requestUrl.searchParams.get('hub.challenge');
-
-    if (!verifyToken) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'VERIFY_TOKEN is not set on server' }));
-      return;
-    }
-
-    if (mode === 'subscribe' && token === verifyToken && challenge) {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end(challenge);
-      return;
-    }
-
-    res.writeHead(403, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Webhook verification failed' }));
+  if (req.method === 'GET' && requestUrl.pathname === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      service: 'glenda-bh-telegram-bot',
+      status: 'ok',
+    }));
     return;
   }
 
-  if (req.method === 'POST' && requestUrl.pathname === '/webhook') {
-    let rawBody = '';
+  if (req.method === 'POST' && requestUrl.pathname === '/telegram/webhook') {
+    const incomingSecret = req.headers['x-telegram-bot-api-secret-token'];
+    if (telegramWebhookSecret && incomingSecret !== telegramWebhookSecret) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid Telegram webhook secret' }));
+      return;
+    }
 
-    req.on('data', (chunk) => {
-      rawBody += chunk;
-    });
-
-    req.on('end', () => {
-      let body;
-
-      try {
-        body = JSON.parse(rawBody || '{}');
-      } catch (error) {
-        console.log('Webhook POST received invalid JSON payload');
+    readRequestBody(req)
+      .then(async (update) => {
+        await handleTelegramUpdate(update);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch(() => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
-        return;
-      }
-
-      console.log('Webhook POST received payload keys:', Object.keys(body));
-
-      if (body.sample && body.sample.field) {
-        console.log(`Webhook sample test received for field: ${body.sample.field}`);
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('EVENT_RECEIVED');
-        return;
-      }
-
-      if (body.object === 'page') {
-        console.log('Incoming webhook event:', JSON.stringify(body));
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('EVENT_RECEIVED');
-        return;
-      }
-
-      console.log('Webhook POST received unsupported payload:', JSON.stringify(body));
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('EVENT_RECEIVED');
-    });
+      });
 
     return;
   }

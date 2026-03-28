@@ -1,8 +1,8 @@
 {
-  "name": "glenda-bh-messenger-bot",
+  "name": "glenda-bh-telegram-bot",
   "version": "0.1.0",
   "private": true,
-  "description": "Apartment management messenger bot",
+  "description": "Apartment management telegram bot",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
