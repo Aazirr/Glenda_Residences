@@ -91,10 +91,10 @@ async function handleRegisterTenant(chatId, userText) {
 
   const steps = [
     { field: 'name', prompt: 'Tenant name received.\n\nWhat is the room number? (e.g., 4C)' },
-    { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the electricity rate (PHP per kWh)?' },
-    { field: 'electricity_rate', prompt: 'Electricity rate recorded.\n\nWhat is the current electricity meter reading?' },
-    { field: 'electricity_reading', prompt: 'Current electricity reading recorded.\n\nWhat is the water rate? Enter "fixed:[amount]" for fixed or "per:[rate]" for per-unit.' },
-    { field: 'water_rate', prompt: 'Water rate recorded.\n\nWhat is the current water meter reading?' },
+    { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
+    { field: 'electricity_rate', prompt: 'Electricity rate saved.\n\nWhat is the current electricity meter reading? (just the number, e.g., 250)' },
+    { field: 'electricity_reading', prompt: 'Electricity meter saved.\n\nWhat is the water rate? (format: fixed:100 or per:15)' },
+    { field: 'water_rate', prompt: 'Water rate saved.\n\nWhat is the current water meter reading? (just the number, e.g., 130)' },
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
 
@@ -111,6 +111,18 @@ async function handleRegisterTenant(chatId, userText) {
       const waterType = state.data.water_rate.startsWith('fixed:') ? 'fixed' : 'per_unit';
       const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
 
+      // Validate all critical values
+      const elec_reading = parseFloat(state.data.electricity_reading);
+      const elec_rate = parseFloat(state.data.electricity_rate);
+      const water_reading = parseFloat(state.data.water_reading);
+
+      if (isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || isNaN(waterValue)) {
+        console.error('Validation error: invalid numbers', { elec_reading, elec_rate, water_reading, waterValue });
+        await sendTelegramMessage(chatId, `Error: invalid number format. Electricity rate: ${state.data.electricity_rate}, Electricity reading: ${state.data.electricity_reading}, Water rate: ${state.data.water_rate}, Water reading: ${state.data.water_reading}`);
+        delete conversationState[chatId];
+        return;
+      }
+
       try {
         console.log(`DEBUG: Inserting room. waterType=${waterType}, waterValue=${waterValue}, data=${JSON.stringify(state.data)}`);
         await dbRun(
@@ -119,11 +131,11 @@ async function handleRegisterTenant(chatId, userText) {
           [
             state.data.room_number,
             state.data.name,
-            parseFloat(state.data.electricity_rate),
-            parseFloat(state.data.electricity_reading),
+            elec_rate,
+            elec_reading,
             waterType,
             waterValue,
-            parseFloat(state.data.water_reading),
+            water_reading,
           ]
         );
         console.log(`DEBUG: Room inserted successfully`);
