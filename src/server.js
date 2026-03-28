@@ -1,4 +1,7 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const PDFDocument = require('pdfkit');
 const db = require('./db');
 
 const port = process.env.PORT || 3000;
@@ -75,6 +78,93 @@ function dbAll(sql, params = []) {
   });
 }
 
+function generateBillFilename(roomNumber, billId) {
+  return `bill_${roomNumber.replace(/\//g, '_')}_${billId}.pdf`;
+}
+
+async function generateBillPDF(room, bill) {
+  const doc = new PDFDocument({ margin: 50 });
+  const filename = generateBillFilename(room.room_number, bill.id);
+  const filepath = path.join(__dirname, '../public', filename);
+
+  // Ensure public directory exists
+  if (!fs.existsSync(path.join(__dirname, '../public'))) {
+    fs.mkdirSync(path.join(__dirname, '../public'), { recursive: true });
+  }
+
+  return new Promise((resolve, reject) => {
+    const stream = fs.createWriteStream(filepath);
+    
+    doc.on('error', reject);
+    stream.on('error', reject);
+    stream.on('finish', () => resolve(filename));
+
+    doc.pipe(stream);
+
+    // Header with logo
+    const logoPath = path.join(__dirname, '../public/logo.jpg');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, 50, 20, { width: 100 });
+    }
+
+    // Title
+    doc.fontSize(20).font('Helvetica-Bold').text('Glenda Residences', 200, 30);
+    doc.fontSize(10).font('Helvetica').text('Billing Statement', 200, 55);
+
+    // Divider
+    doc.moveTo(50, 80).lineTo(545, 80).stroke();
+
+    // Tenant & Room Info
+    doc.fontSize(10).font('Helvetica-Bold').text('BILLING INFORMATION', 50, 100);
+    doc.fontSize(9).font('Helvetica');
+    doc.text(`Room: ${room.room_number}`, 50, 120);
+    doc.text(`Tenant: ${room.tenant_name}`, 50, 135);
+    doc.text(`Contact: ${room.contact_number || 'N/A'}`, 50, 150);
+    doc.text(`Move-in Date: ${room.move_in_date || 'N/A'}`, 50, 165);
+
+    // Bill Period
+    doc.fontSize(10).font('Helvetica-Bold').text('BILLING PERIOD', 300, 100);
+    doc.fontSize(9).font('Helvetica');
+    doc.text(`From: ${bill.period_start}`, 300, 120);
+    doc.text(`To: ${bill.period_end}`, 300, 135);
+    doc.text(`Date Issued: ${new Date(bill.created_at).toLocaleDateString()}`, 300, 150);
+
+    // Divider
+    doc.moveTo(50, 190).lineTo(545, 190).stroke();
+
+    // Charges Section
+    doc.fontSize(12).font('Helvetica-Bold').text('CHARGES', 50, 210);
+
+    // Electricity
+    doc.fontSize(10).font('Helvetica-Bold').text('Electricity', 50, 235);
+    doc.fontSize(9).font('Helvetica');
+    doc.text(`Consumption: ${bill.electricity_consumption.toFixed(2)} kWh @ ₱${room.electricity_rate}/kWh`, 70, 255);
+    doc.text(`Amount: ₱${bill.electricity_cost.toFixed(2)}`, 70, 270, { align: 'right', width: 425 });
+
+    // Water
+    doc.fontSize(10).font('Helvetica-Bold').text('Water', 50, 295);
+    doc.fontSize(9).font('Helvetica');
+    if (bill.water_consumption > 0) {
+      doc.text(`Consumption: ${bill.water_consumption.toFixed(2)} units @ ₱${room.water_rate}/unit`, 70, 315);
+    } else {
+      doc.text(`Fixed Monthly Rate`, 70, 315);
+    }
+    doc.text(`Amount: ₱${bill.water_cost.toFixed(2)}`, 70, 330, { align: 'right', width: 425 });
+
+    // Divider
+    doc.moveTo(50, 355).lineTo(545, 355).stroke();
+
+    // Total
+    doc.fontSize(14).font('Helvetica-Bold').text('TOTAL AMOUNT DUE', 50, 375);
+    doc.fontSize(14).font('Helvetica-Bold').text(`₱${bill.total_cost.toFixed(2)}`, 450, 375, { align: 'right' });
+
+    // Footer
+    doc.fontSize(8).font('Helvetica').text('Thank you for your payment.', 50, 500, { align: 'center' });
+
+    doc.end();
+  });
+}
+
 async function handleRegisterTenant(chatId, userText) {
   if (!conversationState[chatId]) {
     conversationState[chatId] = { command: 'register_tenant', step: 1, data: {} };
@@ -91,7 +181,9 @@ async function handleRegisterTenant(chatId, userText) {
 
   const steps = [
     { field: 'name', prompt: 'Tenant name received.\n\nWhat is the room number? (e.g., 4C)' },
-    { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
+    { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the contact number?' },
+    { field: 'contact_number', prompt: 'Contact number saved.\n\nWhat is the move-in date? (format: YYYY-MM-DD or today\'s date)' },
+    { field: 'move_in_date', prompt: 'Move-in date recorded.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
     { field: 'electricity_rate', prompt: 'Electricity rate saved.\n\nWhat is the current electricity meter reading? (just the number, e.g., 250)' },
     { field: 'electricity_reading', prompt: 'Electricity meter saved.\n\nWhat is the water rate? (format: fixed:100 or per:15)' },
     { field: 'water_rate', prompt: 'Water rate saved.\n\nWhat is the current water meter reading? (just the number, e.g., 130)' },
@@ -126,11 +218,13 @@ async function handleRegisterTenant(chatId, userText) {
 
       try {
         await dbRun(
-          `INSERT INTO rooms (room_number, tenant_name, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO rooms (room_number, tenant_name, contact_number, move_in_date, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             state.data.room_number,
             state.data.name,
+            state.data.contact_number,
+            state.data.move_in_date,
             elec_rate,
             elec_reading,
             waterType,
@@ -247,10 +341,10 @@ ${room.water_rate_type === 'fixed' ? `Fixed Rate: ₱${waterCost.toFixed(2)}` : 
 }
 
 async function handleViewBill(chatId, userText) {
-  const roomNumber = userText.trim();
+  const roomNumber = userText.trim().toUpperCase();
 
   try {
-    const room = await dbGet('SELECT * FROM rooms WHERE room_number = ?', [roomNumber]);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [roomNumber]);
     if (!room) {
       await sendTelegramMessage(chatId, `Room ${roomNumber} not found.`);
       return;
@@ -266,7 +360,12 @@ async function handleViewBill(chatId, userText) {
       return;
     }
 
-    const billText = `
+    // Generate PDF
+    try {
+      const filename = await generateBillPDF(room, bill);
+      const pdfUrl = `${process.env.BOT_URL || 'https://glenda-residences-production.up.railway.app'}/bills/${filename}`;
+      
+      const billText = `
 <b>BILL STATEMENT</b>
 Room: ${room.room_number}
 Tenant: ${room.tenant_name}
@@ -282,9 +381,33 @@ ${bill.water_consumption > 0 ? `Consumption: ${bill.water_consumption.toFixed(2)
 Cost: ₱${bill.water_cost.toFixed(2)}
 
 <b>Total: ₱${bill.total_cost.toFixed(2)}</b>
-    `;
 
-    await sendTelegramMessage(chatId, billText);
+<a href="${pdfUrl}">📄 View Full Bill (PDF)</a>
+      `;
+
+      await sendTelegramMessage(chatId, billText);
+    } catch (pdfErr) {
+      console.error('PDF generation error:', pdfErr);
+      // Fallback to text-only if PDF fails
+      const billText = `
+<b>BILL STATEMENT</b>
+Room: ${room.room_number}
+Tenant: ${room.tenant_name}
+
+Period: ${bill.period_start} to ${bill.period_end}
+
+<b>Electricity:</b>
+Consumption: ${bill.electricity_consumption.toFixed(2)} kWh
+Cost: ₱${bill.electricity_cost.toFixed(2)}
+
+<b>Water:</b>
+${bill.water_consumption > 0 ? `Consumption: ${bill.water_consumption.toFixed(2)} units` : 'Fixed Rate'}
+Cost: ₱${bill.water_cost.toFixed(2)}
+
+<b>Total: ₱${bill.total_cost.toFixed(2)}</b>
+      `;
+      await sendTelegramMessage(chatId, billText);
+    }
   } catch (err) {
     console.error('View bill error:', err);
     await sendTelegramMessage(chatId, 'Error retrieving bill. Try again.');
@@ -380,6 +503,34 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
       });
 
+    return;
+  }
+
+  if (req.method === 'GET' && requestUrl.pathname.startsWith('/bills/')) {
+    const filename = requestUrl.pathname.replace('/bills/', '');
+    // Sanitize filename to prevent directory traversal
+    if (filename.includes('..') || filename.includes('/')) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid filename' }));
+      return;
+    }
+
+    const filepath = path.join(__dirname, '../public', filename);
+    
+    fs.readFile(filepath, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bill not found' }));
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': data.length
+      });
+      res.end(data);
+    });
     return;
   }
 

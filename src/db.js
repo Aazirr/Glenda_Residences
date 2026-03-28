@@ -18,6 +18,7 @@ function initializeSchema() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         room_number TEXT UNIQUE NOT NULL,
         tenant_name TEXT NOT NULL,
+        contact_number TEXT,
         facebook_link TEXT,
         move_in_date TEXT,
         electricity_rate REAL NOT NULL,
