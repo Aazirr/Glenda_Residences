@@ -76,14 +76,20 @@ function dbAll(sql, params = []) {
 }
 
 async function handleRegisterTenant(chatId, userText) {
+  console.log(`[REGISTER] Entry: chatId=${chatId}, userText=${userText}, hasState=${!!conversationState[chatId]}`);
+  
   if (!conversationState[chatId]) {
+    console.log(`[REGISTER] Initializing new registration state`);
     conversationState[chatId] = { command: 'register_tenant', step: 1, data: {} };
     await sendTelegramMessage(chatId, 'Starting tenant registration.\n\nWhat is the tenant name?');
     return;
   }
 
   const state = conversationState[chatId];
+  console.log(`[REGISTER] Existing state: command=${state.command}, step=${state.step}, data=${JSON.stringify(state.data)}`);
+  
   if (state.command !== 'register_tenant') {
+    console.log(`[REGISTER] Wrong command, resetting`);
     conversationState[chatId] = { command: 'register_tenant', step: 1, data: {} };
     await sendTelegramMessage(chatId, 'Starting tenant registration.\n\nWhat is the tenant name?');
     return;
@@ -98,16 +104,24 @@ async function handleRegisterTenant(chatId, userText) {
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
 
+  console.log(`[REGISTER] Checking: step=${state.step} <= length=${steps.length}`);
+  
   if (state.step <= steps.length) {
     const currentStep = steps[state.step - 1];
+    console.log(`[REGISTER] Processing step ${state.step}: field=${currentStep.field}, userText=${userText}`);
+    
     state.data[currentStep.field] = userText;
     state.step++;
 
+    console.log(`[REGISTER] After increment: step=${state.step}, checking if <= ${steps.length}`);
+    
     if (state.step <= steps.length) {
+      console.log(`[REGISTER] Sending next prompt: ${steps[state.step - 1].prompt}`);
       await sendTelegramMessage(chatId, steps[state.step - 1].prompt);
     }
 
     if (state.step > steps.length) {
+      console.log(`[REGISTER] All steps complete, saving to database`);
       const waterType = state.data.water_rate.startsWith('fixed:') ? 'fixed' : 'per_unit';
       const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
 
@@ -335,13 +349,17 @@ async function handleTelegramUpdate(update) {
   }
 
   if (conversationState[chatId]?.command === 'register_tenant') {
+    console.log(`[DISPATCH] Routing to handleRegisterTenant`);
     await handleRegisterTenant(chatId, text);
   } else if (conversationState[chatId]?.command === 'input_reading') {
+    console.log(`[DISPATCH] Routing to handleInputReading`);
     await handleInputReading(chatId, text);
   } else if (conversationState[chatId]?.command === 'view_bill') {
+    console.log(`[DISPATCH] Routing to handleViewBill`);
     await handleViewBill(chatId, text);
     delete conversationState[chatId];
   } else {
+    console.log(`[DISPATCH] No active conversation, state=${JSON.stringify(conversationState[chatId])}`);
     await sendTelegramMessage(chatId, 'Command not recognized. Use /start for help.');
   }
 }
