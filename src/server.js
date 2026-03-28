@@ -93,7 +93,7 @@ async function handleRegisterTenant(chatId, userText) {
     { field: 'name', prompt: 'Tenant name received.\n\nWhat is the room number? (e.g., 4C)' },
     { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the electricity rate (PHP per kWh)?' },
     { field: 'electricity_rate', prompt: 'Electricity rate recorded.\n\nWhat is the current electricity meter reading?' },
-    { field: 'electricity_reading', prompt: 'Current electricity reading recorded.\n\nWhat is the water rate? Enter "fixed:<amount>" for fixed or "per:<rate>" for per-unit.' },
+    { field: 'electricity_reading', prompt: 'Current electricity reading recorded.\n\nWhat is the water rate? Enter "fixed:[amount]" for fixed or "per:[rate]" for per-unit.' },
     { field: 'water_rate', prompt: 'Water rate recorded.\n\nWhat is the current water meter reading?' },
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
