@@ -57,6 +57,39 @@ function initializeSchema() {
         FOREIGN KEY (room_id) REFERENCES rooms(id)
       )
     `);
+
+    migrateRoomsTable();
+  });
+}
+
+function migrateRoomsTable() {
+  db.all('PRAGMA table_info(rooms)', (err, columns) => {
+    if (err) {
+      console.error('Schema migration error (rooms):', err);
+      return;
+    }
+
+    const columnNames = new Set(columns.map((col) => col.name));
+
+    if (!columnNames.has('contact_number')) {
+      db.run('ALTER TABLE rooms ADD COLUMN contact_number TEXT', (alterErr) => {
+        if (alterErr) {
+          console.error('Failed to add contact_number column:', alterErr);
+        } else {
+          console.log('Migration applied: added rooms.contact_number');
+        }
+      });
+    }
+
+    if (!columnNames.has('move_in_date')) {
+      db.run('ALTER TABLE rooms ADD COLUMN move_in_date TEXT', (alterErr) => {
+        if (alterErr) {
+          console.error('Failed to add move_in_date column:', alterErr);
+        } else {
+          console.log('Migration applied: added rooms.move_in_date');
+        }
+      });
+    }
   });
 }
 
