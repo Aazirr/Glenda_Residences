@@ -76,20 +76,14 @@ function dbAll(sql, params = []) {
 }
 
 async function handleRegisterTenant(chatId, userText) {
-  console.log(`[REGISTER] Entry: chatId=${chatId}, userText=${userText}, hasState=${!!conversationState[chatId]}`);
-  
   if (!conversationState[chatId]) {
-    console.log(`[REGISTER] Initializing new registration state`);
     conversationState[chatId] = { command: 'register_tenant', step: 1, data: {} };
     await sendTelegramMessage(chatId, 'Starting tenant registration.\n\nWhat is the tenant name?');
     return;
   }
 
   const state = conversationState[chatId];
-  console.log(`[REGISTER] Existing state: command=${state.command}, step=${state.step}, data=${JSON.stringify(state.data)}`);
-  
   if (state.command !== 'register_tenant') {
-    console.log(`[REGISTER] Wrong command, resetting`);
     conversationState[chatId] = { command: 'register_tenant', step: 1, data: {} };
     await sendTelegramMessage(chatId, 'Starting tenant registration.\n\nWhat is the tenant name?');
     return;
@@ -103,26 +97,18 @@ async function handleRegisterTenant(chatId, userText) {
     { field: 'water_rate', prompt: 'Water rate saved.\n\nWhat is the current water meter reading? (just the number, e.g., 130)' },
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
-
-  console.log(`[REGISTER] Checking: step=${state.step} <= length=${steps.length}`);
   
   if (state.step <= steps.length) {
     const currentStep = steps[state.step - 1];
-    console.log(`[REGISTER] Processing step ${state.step}: field=${currentStep.field}, userText=${userText}`);
-    
-    const nextPrompt = currentStep.prompt; // Save BEFORE incrementing
+    const nextPrompt = currentStep.prompt;
     state.data[currentStep.field] = userText;
     state.step++;
 
-    console.log(`[REGISTER] After increment: step=${state.step}, checking if <= ${steps.length}`);
-    
     if (state.step <= steps.length) {
-      console.log(`[REGISTER] Sending next prompt: ${nextPrompt}`);
       await sendTelegramMessage(chatId, nextPrompt);
     }
 
     if (state.step > steps.length) {
-      console.log(`[REGISTER] All steps complete, saving to database`);
       const waterType = state.data.water_rate.startsWith('fixed:') ? 'fixed' : 'per_unit';
       const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
 
@@ -132,14 +118,13 @@ async function handleRegisterTenant(chatId, userText) {
       const water_reading = parseFloat(state.data.water_reading);
 
       if (isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || isNaN(waterValue)) {
-        console.error('Validation error: invalid numbers', { elec_reading, elec_rate, water_reading, waterValue });
-        await sendTelegramMessage(chatId, `Error: invalid number format. Electricity rate: ${state.data.electricity_rate}, Electricity reading: ${state.data.electricity_reading}, Water rate: ${state.data.water_rate}, Water reading: ${state.data.water_reading}`);
+        console.error('Tenant registration validation error:', { elec_reading, elec_rate, water_reading, waterValue });
+        await sendTelegramMessage(chatId, `Error: invalid input format. Please try again.`);
         delete conversationState[chatId];
         return;
       }
 
       try {
-        console.log(`DEBUG: Inserting room. waterType=${waterType}, waterValue=${waterValue}, data=${JSON.stringify(state.data)}`);
         await dbRun(
           `INSERT INTO rooms (room_number, tenant_name, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -153,7 +138,6 @@ async function handleRegisterTenant(chatId, userText) {
             water_reading,
           ]
         );
-        console.log(`DEBUG: Room inserted successfully`);
 
         await sendTelegramMessage(
           chatId,
@@ -350,17 +334,13 @@ async function handleTelegramUpdate(update) {
   }
 
   if (conversationState[chatId]?.command === 'register_tenant') {
-    console.log(`[DISPATCH] Routing to handleRegisterTenant`);
     await handleRegisterTenant(chatId, text);
   } else if (conversationState[chatId]?.command === 'input_reading') {
-    console.log(`[DISPATCH] Routing to handleInputReading`);
     await handleInputReading(chatId, text);
   } else if (conversationState[chatId]?.command === 'view_bill') {
-    console.log(`[DISPATCH] Routing to handleViewBill`);
     await handleViewBill(chatId, text);
     delete conversationState[chatId];
   } else {
-    console.log(`[DISPATCH] No active conversation, state=${JSON.stringify(conversationState[chatId])}`);
     await sendTelegramMessage(chatId, 'Command not recognized. Use /start for help.');
   }
 }
