@@ -112,6 +112,7 @@ async function handleRegisterTenant(chatId, userText) {
       const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
 
       try {
+        console.log(`DEBUG: Inserting room. waterType=${waterType}, waterValue=${waterValue}, data=${JSON.stringify(state.data)}`);
         await dbRun(
           `INSERT INTO rooms (room_number, tenant_name, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -125,6 +126,7 @@ async function handleRegisterTenant(chatId, userText) {
             parseFloat(state.data.water_reading),
           ]
         );
+        console.log(`DEBUG: Room inserted successfully`);
 
         await sendTelegramMessage(
           chatId,
