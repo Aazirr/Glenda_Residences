@@ -110,14 +110,15 @@ async function handleRegisterTenant(chatId, userText) {
     const currentStep = steps[state.step - 1];
     console.log(`[REGISTER] Processing step ${state.step}: field=${currentStep.field}, userText=${userText}`);
     
+    const nextPrompt = currentStep.prompt; // Save BEFORE incrementing
     state.data[currentStep.field] = userText;
     state.step++;
 
     console.log(`[REGISTER] After increment: step=${state.step}, checking if <= ${steps.length}`);
     
     if (state.step <= steps.length) {
-      console.log(`[REGISTER] Sending next prompt: ${steps[state.step - 1].prompt}`);
-      await sendTelegramMessage(chatId, steps[state.step - 1].prompt);
+      console.log(`[REGISTER] Sending next prompt: ${nextPrompt}`);
+      await sendTelegramMessage(chatId, nextPrompt);
     }
 
     if (state.step > steps.length) {
