@@ -98,7 +98,7 @@ async function handleRegisterTenant(chatId, userText) {
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
 
-  if (state.step < steps.length) {
+  if (state.step <= steps.length) {
     const currentStep = steps[state.step - 1];
     state.data[currentStep.field] = userText;
     state.step++;
