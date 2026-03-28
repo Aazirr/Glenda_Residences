@@ -262,7 +262,7 @@ async function handleInputReading(chatId, userText) {
   }
 
   if (state.step === 1) {
-    state.data.room_number = userText;
+    state.data.room_number = userText.trim().toUpperCase();
     state.step++;
     await sendTelegramMessage(chatId, 'Enter current electricity meter reading:');
   } else if (state.step === 2) {
@@ -273,7 +273,7 @@ async function handleInputReading(chatId, userText) {
     state.data.water_reading = parseFloat(userText);
 
     try {
-      const room = await dbGet('SELECT * FROM rooms WHERE room_number = ?', [state.data.room_number]);
+      const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [state.data.room_number]);
       if (!room) {
         await sendTelegramMessage(chatId, `Room ${state.data.room_number} not found.`);
         delete conversationState[chatId];
@@ -297,7 +297,7 @@ async function handleInputReading(chatId, userText) {
       const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString();
       const periodEnd = now.toLocaleDateString();
 
-      await dbRun(
+      const insertedBill = await dbRun(
         `INSERT INTO bills (room_id, period_start, period_end, electricity_consumption, electricity_cost, water_consumption, water_cost, total_cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -311,6 +311,10 @@ async function handleInputReading(chatId, userText) {
           totalCost,
         ]
       );
+
+      const savedBill = await dbGet('SELECT * FROM bills WHERE id = ?', [insertedBill.id]);
+      const filename = await generateBillPDF(room, savedBill);
+      const pdfUrl = `${process.env.BOT_URL || 'https://glenda-residences-production.up.railway.app'}/bills/${filename}`;
 
       const billText = `
 <b>BILL STATEMENT</b>
@@ -328,6 +332,8 @@ Cost: ₱${electricityCost.toFixed(2)}
 ${room.water_rate_type === 'fixed' ? `Fixed Rate: ₱${waterCost.toFixed(2)}` : `Consumption: ${waterConsumption.toFixed(2)} units\nRate: ₱${room.water_rate} per unit\nCost: ₱${waterCost.toFixed(2)}`}
 
 <b>Total: ₱${totalCost.toFixed(2)}</b>
+
+<a href="${pdfUrl}">View Full Bill (PDF)</a>
       `;
 
       await sendTelegramMessage(chatId, billText);
@@ -451,7 +457,14 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/viewbill') {
-    await sendTelegramMessage(chatId, 'Which room?');
+    const rooms = await dbAll('SELECT room_number FROM rooms ORDER BY room_number ASC');
+    if (!rooms.length) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      return;
+    }
+
+    const roomList = rooms.map((room) => `- ${room.room_number}`).join('\n');
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomList}\n\nWhich room?`);
     conversationState[chatId] = { command: 'view_bill', step: 1 };
     return;
   }
