@@ -266,16 +266,44 @@ async function handleInputReading(chatId, userText) {
     state.step++;
     await sendTelegramMessage(chatId, 'Enter current electricity meter reading:');
   } else if (state.step === 2) {
-    state.data.electricity_reading = parseFloat(userText);
+    const value = parseFloat(userText);
+    if (Number.isNaN(value)) {
+      await sendTelegramMessage(chatId, 'Invalid electricity reading. Please enter a numeric value (e.g., 280).');
+      return;
+    }
+    state.data.electricity_reading = value;
     state.step++;
     await sendTelegramMessage(chatId, 'Enter current water meter reading:');
   } else if (state.step === 3) {
-    state.data.water_reading = parseFloat(userText);
+    const value = parseFloat(userText);
+    if (Number.isNaN(value)) {
+      await sendTelegramMessage(chatId, 'Invalid water reading. Please enter a numeric value (e.g., 180).');
+      return;
+    }
+    state.data.water_reading = value;
 
     try {
       const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [state.data.room_number]);
       if (!room) {
         await sendTelegramMessage(chatId, `Room ${state.data.room_number} not found.`);
+        delete conversationState[chatId];
+        return;
+      }
+
+      if (state.data.electricity_reading < room.electricity_reading) {
+        await sendTelegramMessage(
+          chatId,
+          `Invalid electricity reading. New reading (${state.data.electricity_reading}) cannot be lower than current baseline (${room.electricity_reading}).`
+        );
+        delete conversationState[chatId];
+        return;
+      }
+
+      if (state.data.water_reading < room.water_reading) {
+        await sendTelegramMessage(
+          chatId,
+          `Invalid water reading. New reading (${state.data.water_reading}) cannot be lower than current baseline (${room.water_reading}).`
+        );
         delete conversationState[chatId];
         return;
       }
@@ -310,6 +338,13 @@ async function handleInputReading(chatId, userText) {
           waterCost,
           totalCost,
         ]
+      );
+
+      await dbRun(
+        `UPDATE rooms
+         SET electricity_reading = ?, water_reading = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [state.data.electricity_reading, state.data.water_reading, room.id]
       );
 
       const savedBill = await dbGet('SELECT * FROM bills WHERE id = ?', [insertedBill.id]);

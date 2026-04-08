@@ -133,8 +133,8 @@ This is the active feature set being implemented next.
 
 ### Scope (In Progress)
 
-- [ ] Reading Sanity Checks
-- [ ] Auto Update Room Baseline Readings
+- [x] Reading Sanity Checks
+- [x] Auto Update Room Baseline Readings
 - [ ] Payment Status Window
 - [ ] Tenant Update Command
 - [ ] Delete/Transfer Tenant Flow
