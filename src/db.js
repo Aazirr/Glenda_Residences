@@ -18,6 +18,7 @@ function initializeSchema() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         room_number TEXT UNIQUE NOT NULL,
         tenant_name TEXT NOT NULL,
+        room_rate REAL NOT NULL DEFAULT 0,
         contact_number TEXT,
         facebook_link TEXT,
         move_in_date TEXT,
@@ -48,6 +49,7 @@ function initializeSchema() {
         room_id INTEGER NOT NULL,
         period_start TEXT NOT NULL,
         period_end TEXT NOT NULL,
+        room_rate REAL NOT NULL DEFAULT 0,
         electricity_consumption REAL NOT NULL,
         electricity_cost REAL NOT NULL,
         water_consumption REAL,
@@ -81,6 +83,16 @@ function migrateRoomsTable() {
       });
     }
 
+    if (!columnNames.has('room_rate')) {
+      db.run('ALTER TABLE rooms ADD COLUMN room_rate REAL NOT NULL DEFAULT 0', (alterErr) => {
+        if (alterErr) {
+          console.error('Failed to add room_rate column:', alterErr);
+        } else {
+          console.log('Migration applied: added rooms.room_rate');
+        }
+      });
+    }
+
     if (!columnNames.has('move_in_date')) {
       db.run('ALTER TABLE rooms ADD COLUMN move_in_date TEXT', (alterErr) => {
         if (alterErr) {
@@ -90,6 +102,25 @@ function migrateRoomsTable() {
         }
       });
     }
+
+    db.all('PRAGMA table_info(bills)', (billsErr, billColumns) => {
+      if (billsErr) {
+        console.error('Schema migration error (bills):', billsErr);
+        return;
+      }
+
+      const billColumnNames = new Set(billColumns.map((col) => col.name));
+
+      if (!billColumnNames.has('room_rate')) {
+        db.run('ALTER TABLE bills ADD COLUMN room_rate REAL NOT NULL DEFAULT 0', (alterErr) => {
+          if (alterErr) {
+            console.error('Failed to add bills.room_rate column:', alterErr);
+          } else {
+            console.log('Migration applied: added bills.room_rate');
+          }
+        });
+      }
+    });
   });
 }
 

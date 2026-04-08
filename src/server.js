@@ -135,31 +135,37 @@ async function generateBillPDF(room, bill) {
     // Charges Section
     doc.fontSize(12).font('Helvetica-Bold').text('CHARGES', 50, 210);
 
-    // Electricity
-    doc.fontSize(10).font('Helvetica-Bold').text('Electricity', 50, 235);
+    // Room Rate
+    doc.fontSize(10).font('Helvetica-Bold').text('Room Rate', 50, 235);
     doc.fontSize(9).font('Helvetica');
-    doc.text(`Consumption: ${bill.electricity_consumption.toFixed(2)} kWh @ ₱${room.electricity_rate}/kWh`, 70, 255);
-    doc.text(`Amount: ₱${bill.electricity_cost.toFixed(2)}`, 70, 270, { align: 'right', width: 425 });
+    doc.text(`Monthly Rent: ₱${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 255);
+    doc.text(`Amount: ₱${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 270, { align: 'right', width: 425 });
+
+    // Electricity
+    doc.fontSize(10).font('Helvetica-Bold').text('Electricity', 50, 300);
+    doc.fontSize(9).font('Helvetica');
+    doc.text(`Consumption: ${bill.electricity_consumption.toFixed(2)} kWh @ ₱${room.electricity_rate}/kWh`, 70, 320);
+    doc.text(`Amount: ₱${bill.electricity_cost.toFixed(2)}`, 70, 335, { align: 'right', width: 425 });
 
     // Water
-    doc.fontSize(10).font('Helvetica-Bold').text('Water', 50, 295);
+    doc.fontSize(10).font('Helvetica-Bold').text('Water', 50, 360);
     doc.fontSize(9).font('Helvetica');
     if (bill.water_consumption > 0) {
-      doc.text(`Consumption: ${bill.water_consumption.toFixed(2)} units @ ₱${room.water_rate}/unit`, 70, 315);
+      doc.text(`Consumption: ${bill.water_consumption.toFixed(2)} units @ ₱${room.water_rate}/unit`, 70, 380);
     } else {
-      doc.text(`Fixed Monthly Rate`, 70, 315);
+      doc.text(`Fixed Monthly Rate`, 70, 380);
     }
-    doc.text(`Amount: ₱${bill.water_cost.toFixed(2)}`, 70, 330, { align: 'right', width: 425 });
+    doc.text(`Amount: ₱${bill.water_cost.toFixed(2)}`, 70, 395, { align: 'right', width: 425 });
 
     // Divider
-    doc.moveTo(50, 355).lineTo(545, 355).stroke();
+    doc.moveTo(50, 420).lineTo(545, 420).stroke();
 
     // Total
-    doc.fontSize(14).font('Helvetica-Bold').text('TOTAL AMOUNT DUE', 50, 375);
-    doc.fontSize(14).font('Helvetica-Bold').text(`₱${bill.total_cost.toFixed(2)}`, 450, 375, { align: 'right' });
+    doc.fontSize(14).font('Helvetica-Bold').text('TOTAL AMOUNT DUE', 50, 440);
+    doc.fontSize(14).font('Helvetica-Bold').text(`₱${bill.total_cost.toFixed(2)}`, 450, 440, { align: 'right' });
 
     // Footer
-    doc.fontSize(8).font('Helvetica').text('Thank you for your payment.', 50, 500, { align: 'center' });
+    doc.fontSize(8).font('Helvetica').text('Thank you for your payment.', 50, 520, { align: 'center' });
 
     doc.end();
   });
@@ -183,7 +189,8 @@ async function handleRegisterTenant(chatId, userText) {
     { field: 'name', prompt: 'Tenant name received.\n\nWhat is the room number? (e.g., 4C)' },
     { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the contact number?' },
     { field: 'contact_number', prompt: 'Contact number saved.\n\nWhat is the move-in date? (format: YYYY-MM-DD or today\'s date)' },
-    { field: 'move_in_date', prompt: 'Move-in date recorded.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
+    { field: 'move_in_date', prompt: 'Move-in date recorded.\n\nWhat is the monthly room rate? (just the number, e.g., 3500)' },
+    { field: 'room_rate', prompt: 'Room rate saved.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
     { field: 'electricity_rate', prompt: 'Electricity rate saved.\n\nWhat is the current electricity meter reading? (just the number, e.g., 250)' },
     { field: 'electricity_reading', prompt: 'Electricity meter saved.\n\nWhat is the water rate? (format: fixed:100 or per:15)' },
     { field: 'water_rate', prompt: 'Water rate saved.\n\nWhat is the current water meter reading? (just the number, e.g., 130)' },
@@ -205,12 +212,13 @@ async function handleRegisterTenant(chatId, userText) {
       const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
 
       // Validate all critical values
+      const roomRate = parseFloat(state.data.room_rate);
       const elec_reading = parseFloat(state.data.electricity_reading);
       const elec_rate = parseFloat(state.data.electricity_rate);
       const water_reading = parseFloat(state.data.water_reading);
 
-      if (isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || isNaN(waterValue)) {
-        console.error('Tenant registration validation error:', { elec_reading, elec_rate, water_reading, waterValue });
+      if (isNaN(roomRate) || isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || isNaN(waterValue)) {
+        console.error('Tenant registration validation error:', { roomRate, elec_reading, elec_rate, water_reading, waterValue });
         await sendTelegramMessage(chatId, `Error: invalid input format. Please try again.`);
         delete conversationState[chatId];
         return;
@@ -218,11 +226,12 @@ async function handleRegisterTenant(chatId, userText) {
 
       try {
         await dbRun(
-          `INSERT INTO rooms (room_number, tenant_name, contact_number, move_in_date, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO rooms (room_number, tenant_name, room_rate, contact_number, move_in_date, electricity_rate, electricity_reading, water_rate_type, water_rate, water_reading)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             state.data.room_number,
             state.data.name,
+            roomRate,
             state.data.contact_number,
             state.data.move_in_date,
             elec_rate,
@@ -321,22 +330,25 @@ async function handleInputReading(chatId, userText) {
       }
 
       const totalCost = electricityCost + waterCost;
+      const roomMonthlyRate = Number(room.room_rate || 0);
+      const grandTotal = totalCost + roomMonthlyRate;
       const now = new Date();
       const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString();
       const periodEnd = now.toLocaleDateString();
 
       const insertedBill = await dbRun(
-        `INSERT INTO bills (room_id, period_start, period_end, electricity_consumption, electricity_cost, water_consumption, water_cost, total_cost)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO bills (room_id, period_start, period_end, room_rate, electricity_consumption, electricity_cost, water_consumption, water_cost, total_cost)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           room.id,
           periodStart,
           periodEnd,
+          roomMonthlyRate,
           electricityConsumption,
           electricityCost,
           room.water_rate_type === 'fixed' ? 0 : waterConsumption,
           waterCost,
-          totalCost,
+          grandTotal,
         ]
       );
 
@@ -358,6 +370,9 @@ Tenant: ${room.tenant_name}
 
 Period: ${periodStart} to ${periodEnd}
 
+<b>Room Rate:</b>
+₱${roomMonthlyRate.toFixed(2)}
+
 <b>Electricity:</b>
 Consumption: ${electricityConsumption.toFixed(2)} kWh
 Rate: ₱${room.electricity_rate} per kWh
@@ -366,7 +381,7 @@ Cost: ₱${electricityCost.toFixed(2)}
 <b>Water:</b>
 ${room.water_rate_type === 'fixed' ? `Fixed Rate: ₱${waterCost.toFixed(2)}` : `Consumption: ${waterConsumption.toFixed(2)} units\nRate: ₱${room.water_rate} per unit\nCost: ₱${waterCost.toFixed(2)}`}
 
-<b>Total: ₱${totalCost.toFixed(2)}</b>
+<b>Total: ₱${grandTotal.toFixed(2)}</b>
 
 <a href="${pdfUrl}">View Full Bill (PDF)</a>
       `;
@@ -401,6 +416,8 @@ async function handleViewBill(chatId, userText) {
       return;
     }
 
+    const roomMonthlyRate = Number(bill.room_rate || room.room_rate || 0);
+
     // Generate PDF
     try {
       const filename = await generateBillPDF(room, bill);
@@ -412,6 +429,9 @@ Room: ${room.room_number}
 Tenant: ${room.tenant_name}
 
 Period: ${bill.period_start} to ${bill.period_end}
+
+<b>Room Rate:</b>
+₱${roomMonthlyRate.toFixed(2)}
 
 <b>Electricity:</b>
 Consumption: ${bill.electricity_consumption.toFixed(2)} kWh

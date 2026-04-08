@@ -50,7 +50,7 @@ BOT_URL=https://glenda-residences-production.up.railway.app
   - Shows bot status and available commands.
 - `/registertenant`
   - Multi-step tenant registration flow.
-  - Captures: tenant name, room number, contact number, move-in date, electricity rate, current electricity reading, water rate, current water reading.
+  - Captures: tenant name, room number, contact number, move-in date, monthly room rate, electricity rate, current electricity reading, water rate, current water reading.
 - `/inputreading`
   - Multi-step meter input flow.
   - Captures: room number, new electricity reading, new water reading.
@@ -69,7 +69,7 @@ BOT_URL=https://glenda-residences-production.up.railway.app
   - Fixed: `water_cost = fixed_amount`
   - Per-unit: `water_consumption = new_water_reading - previous_water_reading`, then `water_cost = water_consumption * water_rate`
 - Total:
-  - `total_cost = electricity_cost + water_cost`
+  - `total_cost = room_rate + electricity_cost + water_cost`
 
 ## PDF Bill + Logo
 
@@ -113,13 +113,14 @@ Optional verification:
 ## Database Schema Notes
 
 - `rooms`
-  - Room + tenant profile and current rate/baseline meter values.
+  - Room + tenant profile, monthly room rate, and current rate/baseline meter values.
 - `readings`
   - Historical meter input snapshots.
 - `bills`
   - Computed bill records per room and billing period.
 
 Startup includes schema migration logic for existing SQLite files, including `rooms.contact_number` and `rooms.move_in_date`.
+Startup migration also adds `rooms.room_rate` for older databases.
 
 ## Security Notes
 
@@ -135,6 +136,7 @@ This is the active feature set being implemented next.
 
 - [x] Reading Sanity Checks
 - [x] Auto Update Room Baseline Readings
+- [ ] Monthly Room Rate Billing
 - [ ] Payment Status Window
 - [ ] Tenant Update Command
 - [ ] Delete/Transfer Tenant Flow
@@ -163,19 +165,23 @@ This is the active feature set being implemented next.
   - After successful `/inputreading`, update `rooms.electricity_reading` and `rooms.water_reading`.
   - Prevent repeated billing from stale baseline values.
 
-3. Payment Status Window
+3. Monthly Room Rate Billing
+  - Capture room monthly rate during `/registertenant`.
+  - Add room rate into every generated bill total and PDF.
+
+4. Payment Status Window
   - Add bill payment fields in `bills` table (status, paid_at, payment_notes).
   - Default new bills to `unpaid`.
 
-4. Tenant Update Command
+5. Tenant Update Command
   - Allow editing tenant and pricing details without re-registering.
   - Keep room number uniqueness intact.
 
-5. Delete/Transfer Tenant Flow
+6. Delete/Transfer Tenant Flow
   - Delete flow should keep billing history but clear active tenant assignment.
   - Transfer flow should preserve history and update room ownership safely.
 
-6. Edit Reading
+7. Edit Reading
   - Allow correction of most recent reading/bill per room.
   - Recompute bill totals after edit.
 
@@ -184,6 +190,7 @@ This is the active feature set being implemented next.
 - No negative consumption can be generated.
 - `/inputreading` always updates room baseline values after successful bill generation.
 - Bills visibly show payment status and can be marked paid.
+- Monthly room rate is included in the computed bill total and PDF output.
 - Tenant details can be updated without duplicate-room conflicts.
 - Tenant delete/transfer flows do not erase historical bills.
 - Reading edits are traceable and update computed totals correctly.
