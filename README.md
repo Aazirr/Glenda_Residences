@@ -53,6 +53,8 @@ BOT_URL=https://glenda-residences-production.up.railway.app
   - Captures: tenant name, room number, contact number, move-in date, monthly room rate, electricity rate, current electricity reading, water rate, current water reading.
   - Room numbers are normalized to uppercase, so `4c` and `4C` are treated the same.
   - Water rate prefix is case-insensitive, so `Fixed:100`, `fixed:100`, and `PER:15` are all accepted.
+  - Move-in date accepts common formats like `2026-04-09`, `April 9, 2026`, and `today`.
+  - Monthly room rate and meter values accept commas and currency symbols, like `3,500` or `₱3,500`.
 - `/inputreading`
   - Multi-step meter input flow.
   - Captures: room number, new electricity reading, new water reading.
@@ -166,6 +168,7 @@ This is the active feature set being implemented next.
 2. Case-Insensitive Inputs
   - Normalize room numbers on save and lookup.
   - Accept water-rate prefixes in any letter case.
+  - Accept common date and number formats during tenant registration.
 
 3. Auto Update Room Baseline Readings
   - After successful `/inputreading`, update `rooms.electricity_reading` and `rooms.water_reading`.

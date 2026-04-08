@@ -90,10 +90,49 @@ function parseWaterRate(value) {
     return null;
   }
 
+  const parsedAmount = parseFlexibleNumber(match[2]);
+  if (parsedAmount === null) {
+    return null;
+  }
+
   return {
     type: match[1].toLowerCase() === 'fixed' ? 'fixed' : 'per_unit',
-    amount: parseFloat(match[2]),
+    amount: parsedAmount,
   };
+}
+
+function parseFlexibleNumber(value) {
+  const normalizedValue = String(value || '')
+    .trim()
+    .replace(/,/g, '')
+    .replace(/₱/g, '')
+    .replace(/php/gi, '')
+    .trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedValue = Number(normalizedValue);
+  return Number.isNaN(parsedValue) ? null : parsedValue;
+}
+
+function parseFlexibleDate(value) {
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  if (/^today('?s date)?$/i.test(normalizedValue)) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  const parsedDate = new Date(normalizedValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString().slice(0, 10);
 }
 
 function generateBillFilename(roomNumber, billId) {
@@ -206,11 +245,11 @@ async function handleRegisterTenant(chatId, userText) {
   const steps = [
     { field: 'name', prompt: 'Tenant name received.\n\nWhat is the room number? (e.g., 4C)' },
     { field: 'room_number', prompt: 'Room recorded.\n\nWhat is the contact number?' },
-    { field: 'contact_number', prompt: 'Contact number saved.\n\nWhat is the move-in date? (format: YYYY-MM-DD or today\'s date)' },
-    { field: 'move_in_date', prompt: 'Move-in date recorded.\n\nWhat is the monthly room rate? (just the number, e.g., 3500)' },
-    { field: 'room_rate', prompt: 'Room rate saved.\n\nWhat is the electricity rate? (just the number, e.g., 12 for PHP 12/kWh)' },
-    { field: 'electricity_rate', prompt: 'Electricity rate saved.\n\nWhat is the current electricity meter reading? (just the number, e.g., 250)' },
-    { field: 'electricity_reading', prompt: 'Electricity meter saved.\n\nWhat is the water rate? (format: fixed:100 or per:15)' },
+    { field: 'contact_number', prompt: 'Contact number saved.\n\nWhat is the move-in date? (examples: 2026-04-09, April 9, 2026, today)' },
+    { field: 'move_in_date', prompt: 'Move-in date recorded.\n\nWhat is the monthly room rate? (examples: 3500, 3,500, ₱3,500)' },
+    { field: 'room_rate', prompt: 'Room rate saved.\n\nWhat is the electricity rate? (examples: 12, 12.5, ₱12)' },
+    { field: 'electricity_rate', prompt: 'Electricity rate saved.\n\nWhat is the current electricity meter reading? (examples: 250, 2,500)' },
+    { field: 'electricity_reading', prompt: 'Electricity meter saved.\n\nWhat is the water rate? (format: fixed:100 or per:15, commas allowed)' },
     { field: 'water_rate', prompt: 'Water rate saved.\n\nWhat is the current water meter reading? (just the number, e.g., 130)' },
     { field: 'water_reading', prompt: 'Registering tenant...' },
   ];
@@ -233,13 +272,15 @@ async function handleRegisterTenant(chatId, userText) {
       const waterRate = parseWaterRate(state.data.water_rate);
 
       // Validate all critical values
-      const roomRate = parseFloat(state.data.room_rate);
-      const elec_reading = parseFloat(state.data.electricity_reading);
-      const elec_rate = parseFloat(state.data.electricity_rate);
-      const water_reading = parseFloat(state.data.water_reading);
+      const roomRate = parseFlexibleNumber(state.data.room_rate);
+      const elec_reading = parseFlexibleNumber(state.data.electricity_reading);
+      const elec_rate = parseFlexibleNumber(state.data.electricity_rate);
+      const water_reading = parseFlexibleNumber(state.data.water_reading);
+      const moveInDate = parseFlexibleDate(state.data.move_in_date);
+      const contactNumber = String(state.data.contact_number || '').trim();
 
-      if (isNaN(roomRate) || isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || !waterRate) {
-        console.error('Tenant registration validation error:', { roomRate, elec_reading, elec_rate, water_reading, water_rate: state.data.water_rate });
+      if (roomRate === null || elec_reading === null || elec_rate === null || water_reading === null || !waterRate || !moveInDate) {
+        console.error('Tenant registration validation error:', { roomRate, elec_reading, elec_rate, water_reading, water_rate: state.data.water_rate, moveInDate });
         await sendTelegramMessage(chatId, `Error: invalid input format. Please try again.`);
         delete conversationState[chatId];
         return;
@@ -253,8 +294,8 @@ async function handleRegisterTenant(chatId, userText) {
             state.data.room_number,
             state.data.name,
             roomRate,
-            state.data.contact_number,
-            state.data.move_in_date,
+            contactNumber,
+            moveInDate,
             elec_rate,
             elec_reading,
             waterRate.type,
@@ -294,19 +335,19 @@ async function handleInputReading(chatId, userText) {
   if (state.step === 1) {
     state.data.room_number = normalizeRoomNumber(userText);
     state.step++;
-    await sendTelegramMessage(chatId, 'Enter current electricity meter reading:');
+    await sendTelegramMessage(chatId, 'Enter current electricity meter reading (examples: 280, 2,800):');
   } else if (state.step === 2) {
-    const value = parseFloat(userText);
-    if (Number.isNaN(value)) {
+    const value = parseFlexibleNumber(userText);
+    if (value === null) {
       await sendTelegramMessage(chatId, 'Invalid electricity reading. Please enter a numeric value (e.g., 280).');
       return;
     }
     state.data.electricity_reading = value;
     state.step++;
-    await sendTelegramMessage(chatId, 'Enter current water meter reading:');
+    await sendTelegramMessage(chatId, 'Enter current water meter reading (examples: 180, 1,800):');
   } else if (state.step === 3) {
-    const value = parseFloat(userText);
-    if (Number.isNaN(value)) {
+    const value = parseFlexibleNumber(userText);
+    if (value === null) {
       await sendTelegramMessage(chatId, 'Invalid water reading. Please enter a numeric value (e.g., 180).');
       return;
     }
