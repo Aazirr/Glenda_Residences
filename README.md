@@ -127,19 +127,73 @@ Startup includes schema migration logic for existing SQLite files, including `ro
 - Webhook endpoint validates Telegram secret token when configured.
 - Bill file endpoint sanitizes requested filename.
 
-## Improvement Backlog
+## Current Implementation Sprint
 
-Prioritized next improvements:
+This is the active feature set being implemented next.
 
-1. Prevent negative consumption by rejecting readings lower than current baselines.
-2. Update room baseline readings after each successful `/inputreading` billing cycle.
-3. Block duplicate room registration and add explicit tenant transfer/update flows.
-4. Enforce standardized room format (trim + uppercase) on insert and lookup everywhere.
-5. Add strict validators for date and numeric formats with clear user-facing examples.
-6. Handle water-rate mode changes (fixed/per-unit) with explicit transition rules.
-7. Add payment tracking fields and commands (unpaid/paid, paid date, notes).
-8. Add tenant edit commands (contact number, move-in date, rates).
-9. Add `/cancel` to safely abort any multi-step flow.
-10. Add room list pagination for properties with many units.
-11. Add automated SQLite backup/export strategy for production safety.
-12. Add audit logging (`created_by`, `updated_by`, timestamps per action).
+### Scope (In Progress)
+
+- [ ] Reading Sanity Checks
+- [ ] Auto Update Room Baseline Readings
+- [ ] Payment Status Window
+- [ ] Tenant Update Command
+- [ ] Delete/Transfer Tenant Flow
+- [ ] Edit Reading
+
+### Planned Command Additions
+
+- `/updatetenant`
+  - Update tenant fields for an existing room (name, contact number, move-in date, rates).
+- `/deletetenant`
+  - Remove tenant assignment from a room (with confirmation step).
+- `/transfertenant`
+  - Move an existing tenant from one room to another safely.
+- `/editreading`
+  - Correct the latest reading/bill entry for a room.
+- `/markpaid` and `/paymentstatus`
+  - Mark bills paid and view bill payment state.
+
+### Feature Notes
+
+1. Reading Sanity Checks
+  - Reject new readings lower than current room baselines.
+  - Return clear error message with previous baseline values.
+
+2. Auto Update Room Baseline Readings
+  - After successful `/inputreading`, update `rooms.electricity_reading` and `rooms.water_reading`.
+  - Prevent repeated billing from stale baseline values.
+
+3. Payment Status Window
+  - Add bill payment fields in `bills` table (status, paid_at, payment_notes).
+  - Default new bills to `unpaid`.
+
+4. Tenant Update Command
+  - Allow editing tenant and pricing details without re-registering.
+  - Keep room number uniqueness intact.
+
+5. Delete/Transfer Tenant Flow
+  - Delete flow should keep billing history but clear active tenant assignment.
+  - Transfer flow should preserve history and update room ownership safely.
+
+6. Edit Reading
+  - Allow correction of most recent reading/bill per room.
+  - Recompute bill totals after edit.
+
+### Acceptance Criteria
+
+- No negative consumption can be generated.
+- `/inputreading` always updates room baseline values after successful bill generation.
+- Bills visibly show payment status and can be marked paid.
+- Tenant details can be updated without duplicate-room conflicts.
+- Tenant delete/transfer flows do not erase historical bills.
+- Reading edits are traceable and update computed totals correctly.
+
+## Backlog (After Current Sprint)
+
+1. Enforce standardized room format (trim + uppercase) on insert and lookup everywhere.
+2. Add strict validators for date and numeric formats with clear user-facing examples.
+3. Handle water-rate mode changes (fixed/per-unit) with explicit transition rules.
+4. Add `/cancel` to safely abort any multi-step flow.
+5. Add room list pagination for properties with many units.
+6. Add automated SQLite backup/export strategy for production safety.
+7. Add audit logging (`created_by`, `updated_by`, timestamps per action).
