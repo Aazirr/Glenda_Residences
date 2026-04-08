@@ -78,6 +78,24 @@ function dbAll(sql, params = []) {
   });
 }
 
+function normalizeRoomNumber(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function parseWaterRate(value) {
+  const normalizedValue = String(value || '').trim();
+  const match = normalizedValue.match(/^(fixed|per)\s*:\s*(\d+(?:\.\d+)?)$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    type: match[1].toLowerCase() === 'fixed' ? 'fixed' : 'per_unit',
+    amount: parseFloat(match[2]),
+  };
+}
+
 function generateBillFilename(roomNumber, billId) {
   return `bill_${roomNumber.replace(/\//g, '_')}_${billId}.pdf`;
 }
@@ -200,7 +218,11 @@ async function handleRegisterTenant(chatId, userText) {
   if (state.step <= steps.length) {
     const currentStep = steps[state.step - 1];
     const nextPrompt = currentStep.prompt;
-    state.data[currentStep.field] = userText;
+    if (currentStep.field === 'room_number') {
+      state.data[currentStep.field] = normalizeRoomNumber(userText);
+    } else {
+      state.data[currentStep.field] = userText;
+    }
     state.step++;
 
     if (state.step <= steps.length) {
@@ -208,8 +230,7 @@ async function handleRegisterTenant(chatId, userText) {
     }
 
     if (state.step > steps.length) {
-      const waterType = state.data.water_rate.startsWith('fixed:') ? 'fixed' : 'per_unit';
-      const waterValue = parseFloat(state.data.water_rate.split(':')[1]);
+      const waterRate = parseWaterRate(state.data.water_rate);
 
       // Validate all critical values
       const roomRate = parseFloat(state.data.room_rate);
@@ -217,8 +238,8 @@ async function handleRegisterTenant(chatId, userText) {
       const elec_rate = parseFloat(state.data.electricity_rate);
       const water_reading = parseFloat(state.data.water_reading);
 
-      if (isNaN(roomRate) || isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || isNaN(waterValue)) {
-        console.error('Tenant registration validation error:', { roomRate, elec_reading, elec_rate, water_reading, waterValue });
+      if (isNaN(roomRate) || isNaN(elec_reading) || isNaN(elec_rate) || isNaN(water_reading) || !waterRate) {
+        console.error('Tenant registration validation error:', { roomRate, elec_reading, elec_rate, water_reading, water_rate: state.data.water_rate });
         await sendTelegramMessage(chatId, `Error: invalid input format. Please try again.`);
         delete conversationState[chatId];
         return;
@@ -236,8 +257,8 @@ async function handleRegisterTenant(chatId, userText) {
             state.data.move_in_date,
             elec_rate,
             elec_reading,
-            waterType,
-            waterValue,
+            waterRate.type,
+            waterRate.amount,
             water_reading,
           ]
         );
@@ -271,7 +292,7 @@ async function handleInputReading(chatId, userText) {
   }
 
   if (state.step === 1) {
-    state.data.room_number = userText.trim().toUpperCase();
+    state.data.room_number = normalizeRoomNumber(userText);
     state.step++;
     await sendTelegramMessage(chatId, 'Enter current electricity meter reading:');
   } else if (state.step === 2) {
@@ -397,12 +418,12 @@ ${room.water_rate_type === 'fixed' ? `Fixed Rate: ₱${waterCost.toFixed(2)}` : 
 }
 
 async function handleViewBill(chatId, userText) {
-  const roomNumber = userText.trim().toUpperCase();
+  const normalizedRoomNumber = normalizeRoomNumber(userText);
 
   try {
-    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [roomNumber]);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
     if (!room) {
-      await sendTelegramMessage(chatId, `Room ${roomNumber} not found.`);
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
       return;
     }
 
@@ -412,7 +433,7 @@ async function handleViewBill(chatId, userText) {
     );
 
     if (!bill) {
-      await sendTelegramMessage(chatId, `No bill found for room ${roomNumber}.`);
+      await sendTelegramMessage(chatId, `No bill found for room ${normalizedRoomNumber}.`);
       return;
     }
 

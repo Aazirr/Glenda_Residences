@@ -51,6 +51,8 @@ BOT_URL=https://glenda-residences-production.up.railway.app
 - `/registertenant`
   - Multi-step tenant registration flow.
   - Captures: tenant name, room number, contact number, move-in date, monthly room rate, electricity rate, current electricity reading, water rate, current water reading.
+  - Room numbers are normalized to uppercase, so `4c` and `4C` are treated the same.
+  - Water rate prefix is case-insensitive, so `Fixed:100`, `fixed:100`, and `PER:15` are all accepted.
 - `/inputreading`
   - Multi-step meter input flow.
   - Captures: room number, new electricity reading, new water reading.
@@ -161,27 +163,31 @@ This is the active feature set being implemented next.
   - Reject new readings lower than current room baselines.
   - Return clear error message with previous baseline values.
 
-2. Auto Update Room Baseline Readings
+2. Case-Insensitive Inputs
+  - Normalize room numbers on save and lookup.
+  - Accept water-rate prefixes in any letter case.
+
+3. Auto Update Room Baseline Readings
   - After successful `/inputreading`, update `rooms.electricity_reading` and `rooms.water_reading`.
   - Prevent repeated billing from stale baseline values.
 
-3. Monthly Room Rate Billing
+4. Monthly Room Rate Billing
   - Capture room monthly rate during `/registertenant`.
   - Add room rate into every generated bill total and PDF.
 
-4. Payment Status Window
+5. Payment Status Window
   - Add bill payment fields in `bills` table (status, paid_at, payment_notes).
   - Default new bills to `unpaid`.
 
-5. Tenant Update Command
+6. Tenant Update Command
   - Allow editing tenant and pricing details without re-registering.
   - Keep room number uniqueness intact.
 
-6. Delete/Transfer Tenant Flow
+7. Delete/Transfer Tenant Flow
   - Delete flow should keep billing history but clear active tenant assignment.
   - Transfer flow should preserve history and update room ownership safely.
 
-7. Edit Reading
+8. Edit Reading
   - Allow correction of most recent reading/bill per room.
   - Recompute bill totals after edit.
 
@@ -191,6 +197,7 @@ This is the active feature set being implemented next.
 - `/inputreading` always updates room baseline values after successful bill generation.
 - Bills visibly show payment status and can be marked paid.
 - Monthly room rate is included in the computed bill total and PDF output.
+- Room lookups and water-rate prefixes are case-insensitive.
 - Tenant details can be updated without duplicate-room conflicts.
 - Tenant delete/transfer flows do not erase historical bills.
 - Reading edits are traceable and update computed totals correctly.
