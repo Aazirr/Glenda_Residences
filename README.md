@@ -147,8 +147,11 @@ This is the active feature set being implemented next.
 ### Scope (In Progress)
 
 - [x] Reading Sanity Checks
+- [x] Case-Insensitive Inputs
+- [x] Forgiving Input Formats
 - [x] Auto Update Room Baseline Readings
-- [ ] Monthly Room Rate Billing
+- [x] Monthly Room Rate Billing
+- [x] Persistent Railway Postgres Storage (`DATABASE_URL`)
 - [ ] Payment Status Window
 - [ ] Tenant Update Command
 - [ ] Delete/Transfer Tenant Flow
@@ -202,6 +205,10 @@ This is the active feature set being implemented next.
   - Allow correction of most recent reading/bill per room.
   - Recompute bill totals after edit.
 
+9. Persistent Railway Postgres Storage (`DATABASE_URL`)
+  - Production uses Postgres when `DATABASE_URL` is set.
+  - SQLite remains as local fallback only.
+
 ### Acceptance Criteria
 
 - No negative consumption can be generated.
@@ -215,10 +222,9 @@ This is the active feature set being implemented next.
 
 ## Backlog (After Current Sprint)
 
-1. Enforce standardized room format (trim + uppercase) on insert and lookup everywhere.
-2. Add strict validators for date and numeric formats with clear user-facing examples.
-3. Handle water-rate mode changes (fixed/per-unit) with explicit transition rules.
-4. Add `/cancel` to safely abort any multi-step flow.
-5. Add room list pagination for properties with many units.
-6. Add automated SQLite backup/export strategy for production safety.
-7. Add audit logging (`created_by`, `updated_by`, timestamps per action).
+1. Extend strict validators to all future commands (including `/updatetenant`, `/editreading`).
+2. Handle water-rate mode changes (fixed/per-unit) with explicit transition rules.
+3. Add `/cancel` to safely abort any multi-step flow.
+4. Add room list pagination for properties with many units.
+5. Add automated backup/export strategy for production safety.
+6. Add audit logging (`created_by`, `updated_by`, timestamps per action).
