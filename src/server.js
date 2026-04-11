@@ -135,6 +135,14 @@ function parseFlexibleDate(value) {
   return parsedDate.toISOString().slice(0, 10);
 }
 
+async function getRoomsListText() {
+  const rooms = await dbAll('SELECT room_number FROM rooms ORDER BY room_number ASC');
+  if (!rooms.length) {
+    return null;
+  }
+  return rooms.map((room) => `- ${room.room_number}`).join('\n');
+}
+
 function generateBillFilename(roomNumber, billId) {
   return `bill_${roomNumber.replace(/\//g, '_')}_${billId}.pdf`;
 }
@@ -479,6 +487,8 @@ async function handleViewBill(chatId, userText) {
     }
 
     const roomMonthlyRate = Number(bill.room_rate || room.room_rate || 0);
+    const paymentStatus = (bill.status || 'unpaid').toUpperCase();
+    const paidAtText = bill.paid_at ? new Date(bill.paid_at).toLocaleString() : 'Not yet paid';
 
     // Generate PDF
     try {
@@ -505,6 +515,9 @@ Cost: ₱${bill.water_cost.toFixed(2)}
 
 <b>Total: ₱${bill.total_cost.toFixed(2)}</b>
 
+<b>Payment Status:</b> ${paymentStatus}
+<b>Paid At:</b> ${paidAtText}
+
 <a href="${pdfUrl}">📄 View Full Bill (PDF)</a>
       `;
 
@@ -528,12 +541,109 @@ ${bill.water_consumption > 0 ? `Consumption: ${bill.water_consumption.toFixed(2)
 Cost: ₱${bill.water_cost.toFixed(2)}
 
 <b>Total: ₱${bill.total_cost.toFixed(2)}</b>
+
+<b>Payment Status:</b> ${paymentStatus}
+<b>Paid At:</b> ${paidAtText}
       `;
       await sendTelegramMessage(chatId, billText);
     }
   } catch (err) {
     console.error('View bill error:', err);
     await sendTelegramMessage(chatId, 'Error retrieving bill. Try again.');
+  }
+}
+
+async function handlePaymentStatus(chatId, userText) {
+  const normalizedRoomNumber = normalizeRoomNumber(userText);
+
+  try {
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      return;
+    }
+
+    const bill = await dbGet(
+      'SELECT * FROM bills WHERE room_id = ? ORDER BY created_at DESC LIMIT 1',
+      [room.id]
+    );
+
+    if (!bill) {
+      await sendTelegramMessage(chatId, `No bill found for room ${normalizedRoomNumber}.`);
+      return;
+    }
+
+    const paymentStatus = (bill.status || 'unpaid').toUpperCase();
+    const paidAtText = bill.paid_at ? new Date(bill.paid_at).toLocaleString() : 'Not yet paid';
+    const notesText = bill.payment_notes ? bill.payment_notes : 'None';
+
+    await sendTelegramMessage(
+      chatId,
+      `<b>PAYMENT STATUS</b>\nRoom: ${room.room_number}\nTenant: ${room.tenant_name}\n\nLatest Bill Total: ₱${bill.total_cost.toFixed(2)}\nStatus: <b>${paymentStatus}</b>\nPaid At: ${paidAtText}\nNotes: ${notesText}`
+    );
+  } catch (err) {
+    console.error('Payment status error:', err);
+    await sendTelegramMessage(chatId, 'Error retrieving payment status. Try again.');
+  }
+}
+
+async function handleMarkPaid(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'mark_paid') {
+    conversationState[chatId] = { command: 'mark_paid', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room do you want to mark as paid?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const unpaidBill = await dbGet(
+      "SELECT * FROM bills WHERE room_id = ? AND COALESCE(status, 'unpaid') = 'unpaid' ORDER BY created_at DESC LIMIT 1",
+      [room.id]
+    );
+
+    if (!unpaidBill) {
+      await sendTelegramMessage(chatId, `No unpaid bill found for room ${room.room_number}.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.room = room;
+    state.data.bill = unpaidBill;
+    state.step = 2;
+    await sendTelegramMessage(chatId, `Unpaid bill found for room ${room.room_number} (₱${unpaidBill.total_cost.toFixed(2)}).\n\nEnter payment notes, or type '-' to skip.`);
+    return;
+  }
+
+  if (state.step === 2) {
+    const notes = String(userText || '').trim();
+    const paymentNotes = notes === '-' ? null : notes;
+
+    await dbRun(
+      "UPDATE bills SET status = 'paid', paid_at = CURRENT_TIMESTAMP, payment_notes = ? WHERE id = ?",
+      [paymentNotes, state.data.bill.id]
+    );
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ Bill marked as PAID.\nRoom: ${state.data.room.room_number}\nAmount: ₱${state.data.bill.total_cost.toFixed(2)}\n${paymentNotes ? `Notes: ${paymentNotes}` : ''}`
+    );
+
+    delete conversationState[chatId];
   }
 }
 
@@ -559,7 +669,7 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/start') {
-    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /inputreading, /viewbill');
+    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /inputreading, /viewbill, /paymentstatus, /markpaid');
     return;
   }
 
@@ -574,15 +684,31 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/viewbill') {
-    const rooms = await dbAll('SELECT room_number FROM rooms ORDER BY room_number ASC');
-    if (!rooms.length) {
+    const roomList = await getRoomsListText();
+    if (!roomList) {
       await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
       return;
     }
 
-    const roomList = rooms.map((room) => `- ${room.room_number}`).join('\n');
     await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomList}\n\nWhich room?`);
     conversationState[chatId] = { command: 'view_bill', step: 1 };
+    return;
+  }
+
+  if (text === '/paymentstatus') {
+    const roomList = await getRoomsListText();
+    if (!roomList) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomList}\n\nWhich room do you want to check?`);
+    conversationState[chatId] = { command: 'payment_status', step: 1 };
+    return;
+  }
+
+  if (text === '/markpaid') {
+    await handleMarkPaid(chatId, null);
     return;
   }
 
@@ -593,6 +719,11 @@ async function handleTelegramUpdate(update) {
   } else if (conversationState[chatId]?.command === 'view_bill') {
     await handleViewBill(chatId, text);
     delete conversationState[chatId];
+  } else if (conversationState[chatId]?.command === 'payment_status') {
+    await handlePaymentStatus(chatId, text);
+    delete conversationState[chatId];
+  } else if (conversationState[chatId]?.command === 'mark_paid') {
+    await handleMarkPaid(chatId, text);
   } else {
     await sendTelegramMessage(chatId, 'Command not recognized. Use /start for help.');
   }

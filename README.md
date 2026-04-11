@@ -66,6 +66,10 @@ DATABASE_URL=postgresql://user:password@host:port/database
 - `/viewbill`
   - Lists available rooms first.
   - After room selection, shows latest bill summary plus clickable PDF link.
+- `/paymentstatus`
+  - Lists available rooms and shows payment status for the latest bill (`PAID`/`UNPAID`).
+- `/markpaid`
+  - Lists available rooms, finds latest unpaid bill, and marks it as paid with optional notes.
 
 ## Billing Rules
 
@@ -133,6 +137,7 @@ Optional verification:
   - Computed bill records per room and billing period.
 
 Startup includes schema migration logic for both Postgres and SQLite, including `rooms.contact_number`, `rooms.move_in_date`, `rooms.room_rate`, and `bills.room_rate`.
+Payment status columns are also migrated automatically: `bills.status`, `bills.paid_at`, `bills.payment_notes`.
 
 ## Security Notes
 
@@ -152,7 +157,7 @@ This is the active feature set being implemented next.
 - [x] Auto Update Room Baseline Readings
 - [x] Monthly Room Rate Billing
 - [x] Persistent Railway Postgres Storage (`DATABASE_URL`)
-- [ ] Payment Status Window
+- [x] Payment Status Window
 - [ ] Tenant Update Command
 - [ ] Delete/Transfer Tenant Flow
 - [ ] Edit Reading

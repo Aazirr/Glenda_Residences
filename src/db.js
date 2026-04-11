@@ -62,6 +62,9 @@ function createPostgresAdapter() {
         water_consumption REAL,
         water_cost REAL NOT NULL,
         total_cost REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unpaid',
+        paid_at TIMESTAMP NULL,
+        payment_notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -70,6 +73,10 @@ function createPostgresAdapter() {
     await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS move_in_date TEXT');
     await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_rate REAL NOT NULL DEFAULT 0');
     await pool.query('ALTER TABLE bills ADD COLUMN IF NOT EXISTS room_rate REAL NOT NULL DEFAULT 0');
+    await pool.query("ALTER TABLE bills ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'unpaid'");
+    await pool.query('ALTER TABLE bills ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP NULL');
+    await pool.query('ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_notes TEXT');
+    await pool.query("UPDATE bills SET status = 'unpaid' WHERE status IS NULL OR status = ''");
   }
 
   initializeSchema()
@@ -180,6 +187,9 @@ function createSqliteAdapter() {
           water_consumption REAL,
           water_cost REAL NOT NULL,
           total_cost REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unpaid',
+          paid_at DATETIME,
+          payment_notes TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (room_id) REFERENCES rooms(id)
         )
@@ -221,6 +231,20 @@ function createSqliteAdapter() {
         if (!billColumnNames.has('room_rate')) {
           db.run('ALTER TABLE bills ADD COLUMN room_rate REAL NOT NULL DEFAULT 0');
         }
+
+        if (!billColumnNames.has('status')) {
+          db.run("ALTER TABLE bills ADD COLUMN status TEXT NOT NULL DEFAULT 'unpaid'");
+        }
+
+        if (!billColumnNames.has('paid_at')) {
+          db.run('ALTER TABLE bills ADD COLUMN paid_at DATETIME');
+        }
+
+        if (!billColumnNames.has('payment_notes')) {
+          db.run('ALTER TABLE bills ADD COLUMN payment_notes TEXT');
+        }
+
+        db.run("UPDATE bills SET status = 'unpaid' WHERE status IS NULL OR status = ''");
       });
     });
   }
