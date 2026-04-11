@@ -51,6 +51,8 @@ DATABASE_URL=postgresql://user:password@host:port/database
 
 - `/start`
   - Shows bot status and available commands.
+- `/cancel`
+  - Cancels any active multi-step command flow safely.
 - `/registertenant`
   - Multi-step tenant registration flow.
   - Captures: tenant name, room number, contact number, move-in date, monthly room rate, electricity rate, current electricity reading, water rate, current water reading.
@@ -58,11 +60,24 @@ DATABASE_URL=postgresql://user:password@host:port/database
   - Water rate prefix is case-insensitive, so `Fixed:100`, `fixed:100`, and `PER:15` are all accepted.
   - Move-in date accepts common formats like `2026-04-09`, `April 9, 2026`, and `today`.
   - Monthly room rate and meter values accept commas and currency symbols, like `3,500` or `₱3,500`.
+- `/updatetenant`
+  - Multi-step tenant update flow.
+  - Selects a room, then updates one field at a time: `name`, `contact`, `movein`, `roomrate`, `electricityrate`, or `waterrate`.
+  - Reuses flexible parsing rules for dates, amounts, and water rate format (`fixed:100` or `per:15`).
+- `/deletetenant`
+  - Clears tenant assignment for a room with a confirmation step.
+  - Preserves historical bills for that room.
+- `/transfertenant`
+  - Transfers an active tenant profile from a source room to a vacant target room with confirmation.
+  - Keeps historical bills intact.
 - `/inputreading`
   - Multi-step meter input flow.
   - Captures: room number, new electricity reading, new water reading.
   - Computes costs and total bill.
   - Sends bill summary plus clickable PDF link.
+- `/editreading`
+  - Edits the most recent bill reading for a room.
+  - Recomputes latest bill consumption/cost totals and updates room baseline readings safely.
 - `/viewbill`
   - Lists available rooms first.
   - After room selection, shows latest bill summary plus clickable PDF link.
@@ -158,9 +173,9 @@ This is the active feature set being implemented next.
 - [x] Monthly Room Rate Billing
 - [x] Persistent Railway Postgres Storage (`DATABASE_URL`)
 - [x] Payment Status Window
-- [ ] Tenant Update Command
-- [ ] Delete/Transfer Tenant Flow
-- [ ] Edit Reading
+- [x] Tenant Update Command
+- [x] Delete/Transfer Tenant Flow
+- [x] Edit Reading
 
 ### Planned Command Additions
 
@@ -229,7 +244,6 @@ This is the active feature set being implemented next.
 
 1. Extend strict validators to all future commands (including `/updatetenant`, `/editreading`).
 2. Handle water-rate mode changes (fixed/per-unit) with explicit transition rules.
-3. Add `/cancel` to safely abort any multi-step flow.
-4. Add room list pagination for properties with many units.
-5. Add automated backup/export strategy for production safety.
-6. Add audit logging (`created_by`, `updated_by`, timestamps per action).
+3. Add room list pagination for properties with many units.
+4. Add automated backup/export strategy for production safety.
+5. Add audit logging (`created_by`, `updated_by`, timestamps per action).

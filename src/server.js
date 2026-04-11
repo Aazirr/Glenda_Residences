@@ -82,6 +82,11 @@ function normalizeRoomNumber(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function isVacantTenantName(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return !normalized || normalized === 'VACANT';
+}
+
 function parseWaterRate(value) {
   const normalizedValue = String(value || '').trim();
   const match = normalizedValue.match(/^(fixed|per)\s*:\s*(\d+(?:\.\d+)?)$/i);
@@ -647,6 +652,520 @@ async function handleMarkPaid(chatId, userText) {
   }
 }
 
+async function handleUpdateTenant(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'update_tenant') {
+    conversationState[chatId] = { command: 'update_tenant', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room do you want to update?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.room = room;
+    state.step = 2;
+    await sendTelegramMessage(
+      chatId,
+      `<b>Room ${room.room_number}</b> selected.\n\nWhat do you want to update?\n- name\n- contact\n- movein\n- roomrate\n- electricityrate\n- waterrate\n\nType one option exactly.`
+    );
+    return;
+  }
+
+  if (state.step === 2) {
+    const fieldInput = String(userText || '').trim().toLowerCase();
+    const supportedFields = {
+      name: {
+        prompt: 'Enter new tenant name:',
+        sql: 'UPDATE rooms SET tenant_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => ({ ok: true, value: String(value || '').trim(), label: 'Tenant name' }),
+      },
+      contact: {
+        prompt: 'Enter new contact number:',
+        sql: 'UPDATE rooms SET contact_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => ({ ok: true, value: String(value || '').trim(), label: 'Contact number' }),
+      },
+      movein: {
+        prompt: 'Enter new move-in date (examples: 2026-04-09, April 9, 2026, today):',
+        sql: 'UPDATE rooms SET move_in_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => {
+          const parsed = parseFlexibleDate(value);
+          return parsed ? { ok: true, value: parsed, label: 'Move-in date' } : { ok: false, error: 'Invalid date format.' };
+        },
+      },
+      roomrate: {
+        prompt: 'Enter new monthly room rate (examples: 3500, 3,500, ₱3,500):',
+        sql: 'UPDATE rooms SET room_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => {
+          const parsed = parseFlexibleNumber(value);
+          return parsed !== null ? { ok: true, value: parsed, label: 'Room rate' } : { ok: false, error: 'Invalid room rate format.' };
+        },
+      },
+      electricityrate: {
+        prompt: 'Enter new electricity rate (examples: 12, 12.5, ₱12):',
+        sql: 'UPDATE rooms SET electricity_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => {
+          const parsed = parseFlexibleNumber(value);
+          return parsed !== null ? { ok: true, value: parsed, label: 'Electricity rate' } : { ok: false, error: 'Invalid electricity rate format.' };
+        },
+      },
+      waterrate: {
+        prompt: 'Enter new water rate (format: fixed:100 or per:15, commas allowed):',
+        sql: 'UPDATE rooms SET water_rate_type = ?, water_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        formatter: (value) => {
+          const parsed = parseWaterRate(value);
+          return parsed
+            ? { ok: true, value: parsed, label: 'Water rate' }
+            : { ok: false, error: 'Invalid water rate format. Use fixed:100 or per:15.' };
+        },
+      },
+    };
+
+    const selectedField = supportedFields[fieldInput];
+    if (!selectedField) {
+      await sendTelegramMessage(chatId, 'Invalid option. Type one of: name, contact, movein, roomrate, electricityrate, waterrate.');
+      return;
+    }
+
+    state.data.fieldKey = fieldInput;
+    state.step = 3;
+    await sendTelegramMessage(chatId, selectedField.prompt);
+    return;
+  }
+
+  if (state.step === 3) {
+    const fieldKey = state.data.fieldKey;
+    const room = state.data.room;
+    const fieldConfig = {
+      name: {
+        sql: 'UPDATE rooms SET tenant_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value, room.id],
+      },
+      contact: {
+        sql: 'UPDATE rooms SET contact_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value, room.id],
+      },
+      movein: {
+        sql: 'UPDATE rooms SET move_in_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value, room.id],
+      },
+      roomrate: {
+        sql: 'UPDATE rooms SET room_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value, room.id],
+      },
+      electricityrate: {
+        sql: 'UPDATE rooms SET electricity_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value, room.id],
+      },
+      waterrate: {
+        sql: 'UPDATE rooms SET water_rate_type = ?, water_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        buildParams: (value) => [value.type, value.amount, room.id],
+      },
+    };
+
+    const parseInput = {
+      name: (value) => {
+        const normalized = String(value || '').trim();
+        if (!normalized) return { ok: false, error: 'Tenant name cannot be empty.' };
+        return { ok: true, value: normalized, label: 'Tenant name', rendered: normalized };
+      },
+      contact: (value) => {
+        const normalized = String(value || '').trim();
+        if (!normalized) return { ok: false, error: 'Contact number cannot be empty.' };
+        return { ok: true, value: normalized, label: 'Contact number', rendered: normalized };
+      },
+      movein: (value) => {
+        const parsed = parseFlexibleDate(value);
+        if (!parsed) return { ok: false, error: 'Invalid date format.' };
+        return { ok: true, value: parsed, label: 'Move-in date', rendered: parsed };
+      },
+      roomrate: (value) => {
+        const parsed = parseFlexibleNumber(value);
+        if (parsed === null) return { ok: false, error: 'Invalid room rate format.' };
+        return { ok: true, value: parsed, label: 'Room rate', rendered: `₱${Number(parsed).toFixed(2)}` };
+      },
+      electricityrate: (value) => {
+        const parsed = parseFlexibleNumber(value);
+        if (parsed === null) return { ok: false, error: 'Invalid electricity rate format.' };
+        return { ok: true, value: parsed, label: 'Electricity rate', rendered: `₱${Number(parsed).toFixed(2)}` };
+      },
+      waterrate: (value) => {
+        const parsed = parseWaterRate(value);
+        if (!parsed) return { ok: false, error: 'Invalid water rate format. Use fixed:100 or per:15.' };
+        const rendered = parsed.type === 'fixed' ? `fixed:₱${Number(parsed.amount).toFixed(2)}` : `per:₱${Number(parsed.amount).toFixed(2)}`;
+        return { ok: true, value: parsed, label: 'Water rate', rendered };
+      },
+    };
+
+    const parser = parseInput[fieldKey];
+    const config = fieldConfig[fieldKey];
+
+    if (!parser || !config) {
+      await sendTelegramMessage(chatId, 'Could not process update request. Please start again with /updatetenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    const parsed = parser(userText);
+    if (!parsed.ok) {
+      await sendTelegramMessage(chatId, parsed.error);
+      return;
+    }
+
+    try {
+      await dbRun(config.sql, config.buildParams(parsed.value));
+      await sendTelegramMessage(
+        chatId,
+        `✅ ${parsed.label} updated for room ${room.room_number}.\nNew value: ${parsed.rendered}`
+      );
+    } catch (err) {
+      console.error('Update tenant error:', err);
+      await sendTelegramMessage(chatId, 'Error updating tenant. Try again.');
+    }
+
+    delete conversationState[chatId];
+  }
+}
+
+async function handleDeleteTenant(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'delete_tenant') {
+    conversationState[chatId] = { command: 'delete_tenant', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room tenant assignment do you want to clear?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    if (isVacantTenantName(room.tenant_name)) {
+      await sendTelegramMessage(chatId, `Room ${room.room_number} is already vacant.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.room = room;
+    state.step = 2;
+    await sendTelegramMessage(
+      chatId,
+      `You are about to clear tenant assignment for room ${room.room_number} (${room.tenant_name}).\nBilling history will be kept.\n\nType YES to confirm.`
+    );
+    return;
+  }
+
+  if (state.step === 2) {
+    const confirmation = String(userText || '').trim().toUpperCase();
+    if (confirmation !== 'YES') {
+      await sendTelegramMessage(chatId, 'Delete cancelled. No changes were made.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    try {
+      await dbRun(
+        `UPDATE rooms
+         SET tenant_name = ?, contact_number = NULL, move_in_date = NULL, room_rate = 0, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        ['VACANT', state.data.room.id]
+      );
+
+      await sendTelegramMessage(
+        chatId,
+        `✅ Tenant assignment cleared for room ${state.data.room.room_number}.\nHistorical bills were preserved.`
+      );
+    } catch (err) {
+      console.error('Delete tenant error:', err);
+      await sendTelegramMessage(chatId, 'Error clearing tenant assignment. Try again.');
+    }
+
+    delete conversationState[chatId];
+  }
+}
+
+async function handleTransferTenant(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'transfer_tenant') {
+    conversationState[chatId] = { command: 'transfer_tenant', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nEnter source room (current tenant room):`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const sourceRoomNumber = normalizeRoomNumber(userText);
+    const sourceRoom = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [sourceRoomNumber]);
+    if (!sourceRoom) {
+      await sendTelegramMessage(chatId, `Room ${sourceRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    if (isVacantTenantName(sourceRoom.tenant_name)) {
+      await sendTelegramMessage(chatId, `Room ${sourceRoom.room_number} has no active tenant to transfer.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.sourceRoom = sourceRoom;
+    state.step = 2;
+    await sendTelegramMessage(chatId, `Source room ${sourceRoom.room_number} selected (${sourceRoom.tenant_name}).\n\nEnter target room:`);
+    return;
+  }
+
+  if (state.step === 2) {
+    const targetRoomNumber = normalizeRoomNumber(userText);
+    const sourceRoom = state.data.sourceRoom;
+
+    if (targetRoomNumber === normalizeRoomNumber(sourceRoom.room_number)) {
+      await sendTelegramMessage(chatId, 'Target room must be different from source room.');
+      return;
+    }
+
+    const targetRoom = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [targetRoomNumber]);
+    if (!targetRoom) {
+      await sendTelegramMessage(chatId, `Room ${targetRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    if (!isVacantTenantName(targetRoom.tenant_name)) {
+      await sendTelegramMessage(chatId, `Room ${targetRoom.room_number} is occupied by ${targetRoom.tenant_name}. Target room must be vacant.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.targetRoom = targetRoom;
+    state.step = 3;
+    await sendTelegramMessage(
+      chatId,
+      `Transfer tenant ${sourceRoom.tenant_name} from ${sourceRoom.room_number} to ${targetRoom.room_number}?\n\nType YES to confirm.`
+    );
+    return;
+  }
+
+  if (state.step === 3) {
+    const confirmation = String(userText || '').trim().toUpperCase();
+    if (confirmation !== 'YES') {
+      await sendTelegramMessage(chatId, 'Transfer cancelled. No changes were made.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    const sourceRoom = state.data.sourceRoom;
+    const targetRoom = state.data.targetRoom;
+
+    try {
+      await dbRun(
+        `UPDATE rooms
+         SET tenant_name = ?, contact_number = ?, move_in_date = ?, room_rate = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [sourceRoom.tenant_name, sourceRoom.contact_number, sourceRoom.move_in_date, sourceRoom.room_rate, targetRoom.id]
+      );
+
+      await dbRun(
+        `UPDATE rooms
+         SET tenant_name = ?, contact_number = NULL, move_in_date = NULL, room_rate = 0, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        ['VACANT', sourceRoom.id]
+      );
+
+      await sendTelegramMessage(
+        chatId,
+        `✅ Tenant transferred successfully.\nFrom: ${sourceRoom.room_number}\nTo: ${targetRoom.room_number}\nTenant: ${sourceRoom.tenant_name}`
+      );
+    } catch (err) {
+      console.error('Transfer tenant error:', err);
+      await sendTelegramMessage(chatId, 'Error transferring tenant. Try again.');
+    }
+
+    delete conversationState[chatId];
+  }
+}
+
+async function handleEditReading(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'edit_reading') {
+    conversationState[chatId] = { command: 'edit_reading', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room bill reading do you want to edit?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const bill = await dbGet(
+      'SELECT * FROM bills WHERE room_id = ? ORDER BY created_at DESC LIMIT 1',
+      [room.id]
+    );
+
+    if (!bill) {
+      await sendTelegramMessage(chatId, `No bill found for room ${room.room_number}.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const previousElectricityBaseline = Number(room.electricity_reading) - Number(bill.electricity_consumption || 0);
+    const previousWaterBaseline = Number(room.water_reading) - Number(bill.water_consumption || 0);
+
+    if (previousElectricityBaseline < 0 || previousWaterBaseline < 0) {
+      await sendTelegramMessage(chatId, 'Cannot safely compute previous baseline for this room. Please check existing bill/readings data first.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.room = room;
+    state.data.bill = bill;
+    state.data.previousElectricityBaseline = previousElectricityBaseline;
+    state.data.previousWaterBaseline = previousWaterBaseline;
+    state.step = 2;
+
+    await sendTelegramMessage(
+      chatId,
+      `Latest bill found for room ${room.room_number}.\nCurrent billed totals: ₱${Number(bill.total_cost).toFixed(2)}\n\nPrevious electricity baseline: ${previousElectricityBaseline.toFixed(2)}\nEnter corrected current electricity reading:`
+    );
+    return;
+  }
+
+  if (state.step === 2) {
+    const electricityReading = parseFlexibleNumber(userText);
+    if (electricityReading === null) {
+      await sendTelegramMessage(chatId, 'Invalid electricity reading. Please enter a numeric value.');
+      return;
+    }
+
+    if (electricityReading < state.data.previousElectricityBaseline) {
+      await sendTelegramMessage(
+        chatId,
+        `Invalid electricity reading. It cannot be lower than previous baseline (${state.data.previousElectricityBaseline.toFixed(2)}).`
+      );
+      return;
+    }
+
+    state.data.correctedElectricityReading = electricityReading;
+    state.step = 3;
+
+    await sendTelegramMessage(
+      chatId,
+      `Previous water baseline: ${state.data.previousWaterBaseline.toFixed(2)}\nEnter corrected current water reading:`
+    );
+    return;
+  }
+
+  if (state.step === 3) {
+    const waterReading = parseFlexibleNumber(userText);
+    if (waterReading === null) {
+      await sendTelegramMessage(chatId, 'Invalid water reading. Please enter a numeric value.');
+      return;
+    }
+
+    if (waterReading < state.data.previousWaterBaseline) {
+      await sendTelegramMessage(
+        chatId,
+        `Invalid water reading. It cannot be lower than previous baseline (${state.data.previousWaterBaseline.toFixed(2)}).`
+      );
+      return;
+    }
+
+    const room = state.data.room;
+    const bill = state.data.bill;
+    const previousElectricityBaseline = state.data.previousElectricityBaseline;
+    const previousWaterBaseline = state.data.previousWaterBaseline;
+    const correctedElectricityReading = state.data.correctedElectricityReading;
+    const correctedWaterReading = waterReading;
+
+    const electricityConsumption = correctedElectricityReading - previousElectricityBaseline;
+    const electricityCost = electricityConsumption * Number(room.electricity_rate);
+
+    let waterConsumption = 0;
+    let waterCost = 0;
+
+    if (room.water_rate_type === 'fixed') {
+      waterCost = Number(room.water_rate || 0);
+    } else {
+      waterConsumption = correctedWaterReading - previousWaterBaseline;
+      waterCost = waterConsumption * Number(room.water_rate || 0);
+    }
+
+    const roomMonthlyRate = Number(bill.room_rate || room.room_rate || 0);
+    const totalCost = roomMonthlyRate + electricityCost + waterCost;
+
+    try {
+      await dbRun(
+        `UPDATE bills
+         SET electricity_consumption = ?, electricity_cost = ?, water_consumption = ?, water_cost = ?, total_cost = ?
+         WHERE id = ?`,
+        [electricityConsumption, electricityCost, waterConsumption, waterCost, totalCost, bill.id]
+      );
+
+      await dbRun(
+        `UPDATE rooms
+         SET electricity_reading = ?, water_reading = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [correctedElectricityReading, correctedWaterReading, room.id]
+      );
+
+      await sendTelegramMessage(
+        chatId,
+        `✅ Latest reading updated for room ${room.room_number}.\nOld total: ₱${Number(bill.total_cost).toFixed(2)}\nNew total: ₱${totalCost.toFixed(2)}\nElectricity consumption: ${electricityConsumption.toFixed(2)}\n${room.water_rate_type === 'fixed' ? `Water cost (fixed): ₱${waterCost.toFixed(2)}` : `Water consumption: ${waterConsumption.toFixed(2)}`}`
+      );
+    } catch (err) {
+      console.error('Edit reading error:', err);
+      await sendTelegramMessage(chatId, 'Error editing reading. Try again.');
+    }
+
+    delete conversationState[chatId];
+  }
+}
+
 async function handleTelegramUpdate(update) {
   const message = update.message;
 
@@ -668,8 +1187,18 @@ async function handleTelegramUpdate(update) {
     return;
   }
 
+  if (text === '/cancel') {
+    if (conversationState[chatId]) {
+      delete conversationState[chatId];
+      await sendTelegramMessage(chatId, 'Current operation cancelled.');
+    } else {
+      await sendTelegramMessage(chatId, 'No active operation to cancel.');
+    }
+    return;
+  }
+
   if (text === '/start') {
-    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /inputreading, /viewbill, /paymentstatus, /markpaid');
+    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /updatetenant, /deletetenant, /transfertenant, /inputreading, /editreading, /viewbill, /paymentstatus, /markpaid, /cancel');
     return;
   }
 
@@ -680,6 +1209,21 @@ async function handleTelegramUpdate(update) {
 
   if (text === '/inputreading') {
     await handleInputReading(chatId, null);
+    return;
+  }
+
+  if (text === '/updatetenant') {
+    await handleUpdateTenant(chatId, null);
+    return;
+  }
+
+  if (text === '/deletetenant') {
+    await handleDeleteTenant(chatId, null);
+    return;
+  }
+
+  if (text === '/transfertenant') {
+    await handleTransferTenant(chatId, null);
     return;
   }
 
@@ -712,6 +1256,11 @@ async function handleTelegramUpdate(update) {
     return;
   }
 
+  if (text === '/editreading') {
+    await handleEditReading(chatId, null);
+    return;
+  }
+
   if (conversationState[chatId]?.command === 'register_tenant') {
     await handleRegisterTenant(chatId, text);
   } else if (conversationState[chatId]?.command === 'input_reading') {
@@ -724,6 +1273,14 @@ async function handleTelegramUpdate(update) {
     delete conversationState[chatId];
   } else if (conversationState[chatId]?.command === 'mark_paid') {
     await handleMarkPaid(chatId, text);
+  } else if (conversationState[chatId]?.command === 'update_tenant') {
+    await handleUpdateTenant(chatId, text);
+  } else if (conversationState[chatId]?.command === 'delete_tenant') {
+    await handleDeleteTenant(chatId, text);
+  } else if (conversationState[chatId]?.command === 'transfer_tenant') {
+    await handleTransferTenant(chatId, text);
+  } else if (conversationState[chatId]?.command === 'edit_reading') {
+    await handleEditReading(chatId, text);
   } else {
     await sendTelegramMessage(chatId, 'Command not recognized. Use /start for help.');
   }
