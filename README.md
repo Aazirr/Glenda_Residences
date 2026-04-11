@@ -4,11 +4,12 @@ Telegram bot for apartment management and utility billing at Glenda Residences.
 
 ## Overview
 
-This service receives Telegram webhook updates, stores tenant and billing data in SQLite, generates PDF bills, and runs on Railway.
+This service receives Telegram webhook updates, stores tenant and billing data in PostgreSQL (via Railway `DATABASE_URL`) or SQLite fallback for local development, generates PDF bills, and runs on Railway.
 
 ## Tech Stack
 
 - Node.js (built-in `http` server)
+- PostgreSQL (`pg`) for production persistence
 - SQLite (`sqlite3`)
 - PDF generation (`pdfkit`)
 - Railway (hosting)
@@ -22,6 +23,7 @@ Create a `.env` file from `.env.example` and set:
 - `TELEGRAM_WEBHOOK_SECRET`
 - `OWNER_TELEGRAM_ID` (Telegram ID allowed to use admin commands)
 - `BOT_URL` (optional but recommended, public base URL used in PDF links)
+- `DATABASE_URL` (required on Railway for persistent Postgres)
 
 Example:
 
@@ -31,6 +33,7 @@ TELEGRAM_BOT_TOKEN=replace_me
 TELEGRAM_WEBHOOK_SECRET=replace_me
 OWNER_TELEGRAM_ID=6977978829
 BOT_URL=https://glenda-residences-production.up.railway.app
+DATABASE_URL=postgresql://user:password@host:port/database
 ```
 
 ## Endpoints
@@ -102,7 +105,13 @@ Default local URL:
    - `TELEGRAM_WEBHOOK_SECRET`
    - `OWNER_TELEGRAM_ID`
    - `BOT_URL` (set this to your Railway app URL)
+  - `DATABASE_URL` (from your Railway Postgres service)
 4. Deploy.
+
+Important:
+
+- Railway filesystem is ephemeral, so SQLite files reset on deploy.
+- Use `DATABASE_URL` to persist tenant and billing data in Railway Postgres.
 
 ## Set Telegram Webhook
 
@@ -123,8 +132,7 @@ Optional verification:
 - `bills`
   - Computed bill records per room and billing period.
 
-Startup includes schema migration logic for existing SQLite files, including `rooms.contact_number` and `rooms.move_in_date`.
-Startup migration also adds `rooms.room_rate` for older databases.
+Startup includes schema migration logic for both Postgres and SQLite, including `rooms.contact_number`, `rooms.move_in_date`, `rooms.room_rate`, and `bills.room_rate`.
 
 ## Security Notes
 
