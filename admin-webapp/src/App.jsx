@@ -72,11 +72,14 @@ function LoginScreen({ onLogin }) {
 }
 
 function Dashboard({ token, onLogout, email }) {
+  const [activeTab, setActiveTab] = useState('home');
   const [dashboard, setDashboard] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [tenantDrafts, setTenantDrafts] = useState({});
+  const [billEditDrafts, setBillEditDrafts] = useState({});
 
   const [registerForm, setRegisterForm] = useState({
     tenant_name: '',
@@ -105,6 +108,34 @@ function Dashboard({ token, onLogout, email }) {
       ]);
       setDashboard(dashboardData);
       setRooms(roomData);
+
+      setTenantDrafts((previous) => {
+        const next = { ...previous };
+        for (const room of roomData) {
+          if (!next[room.id]) {
+            next[room.id] = {
+              tenant_name: room.tenant_name || '',
+              contact_number: room.contact_number || '',
+              move_in_date: room.move_in_date || '',
+              room_rate: room.room_rate || 0,
+            };
+          }
+        }
+        return next;
+      });
+
+      setBillEditDrafts((previous) => {
+        const next = { ...previous };
+        for (const room of roomData) {
+          if (!next[room.id]) {
+            next[room.id] = {
+              electricity_reading: '',
+              water_reading: '',
+            };
+          }
+        }
+        return next;
+      });
     } catch (err) {
       setError(err.message);
     }
@@ -161,16 +192,68 @@ function Dashboard({ token, onLogout, email }) {
   const sendReminder = async (billId) => runAction(() => apiRequest(`/api/bills/${billId}/send-reminder`, { method: 'POST' }, token));
   const sendAllReminders = async () => runAction(() => apiRequest('/api/bills/send-reminder-all', { method: 'POST' }, token));
 
-  return (
-    <div className="app-shell">
-      <header className="header card">
-        <div>
-          <p className="muted">Good evening</p>
-          <h2>{email}</h2>
-        </div>
-        <button className="ghost-btn" onClick={onLogout}>Logout</button>
-      </header>
+  const updateTenantDraft = (roomId, field, value) => {
+    setTenantDrafts((previous) => ({
+      ...previous,
+      [roomId]: {
+        ...(previous[roomId] || {}),
+        [field]: value,
+      },
+    }));
+  };
 
+  const saveTenant = async (roomId) => {
+    const draft = tenantDrafts[roomId] || {};
+    await runAction(() =>
+      apiRequest(`/api/tenants/${roomId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          tenant_name: draft.tenant_name,
+          contact_number: draft.contact_number,
+          move_in_date: draft.move_in_date,
+          room_rate: draft.room_rate,
+        }),
+      }, token)
+    );
+  };
+
+  const clearTenant = async (roomId) => runAction(() => apiRequest(`/api/tenants/${roomId}/clear`, { method: 'POST' }, token));
+
+  const updateBillDraft = (roomId, field, value) => {
+    setBillEditDrafts((previous) => ({
+      ...previous,
+      [roomId]: {
+        ...(previous[roomId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const editLatestBill = async (roomId) => {
+    const draft = billEditDrafts[roomId] || {};
+    await runAction(() =>
+      apiRequest(`/api/readings/${roomId}/edit-latest`, {
+        method: 'POST',
+        body: JSON.stringify({
+          electricity_reading: draft.electricity_reading,
+          water_reading: draft.water_reading,
+        }),
+      }, token)
+    );
+
+    setBillEditDrafts((previous) => ({
+      ...previous,
+      [roomId]: {
+        electricity_reading: '',
+        water_reading: '',
+      },
+    }));
+  };
+
+  const billRows = filteredRooms.filter((room) => room.latest_bill_id);
+
+  const renderHome = () => (
+    <>
       <section className="card card--hero">
         <p className="eyebrow">Outstanding Balance</p>
         <h1 className="hero-title">PHP {Number(dashboard?.unpaidAmount || 0).toFixed(2)}</h1>
@@ -193,6 +276,22 @@ function Dashboard({ token, onLogout, email }) {
         </div>
       </section>
 
+      <section className="card">
+        <div className="section-head">
+          <h3>Quick Actions</h3>
+          <button className="ghost-btn" onClick={sendAllReminders}>Send All Reminders</button>
+        </div>
+        <div className="quick-stats">
+          <button className="pill" onClick={() => setActiveTab('add')}>Register Tenant</button>
+          <button className="pill" onClick={() => setActiveTab('bills')}>Review Bills</button>
+          <button className="pill" onClick={() => setActiveTab('tenants')}>Manage Tenants</button>
+        </div>
+      </section>
+    </>
+  );
+
+  const renderBills = () => (
+    <>
       <section className="filter-pills">
         <button className={`pill ${activeFilter === 'all' ? 'pill--active' : ''}`} onClick={() => setActiveFilter('all')}>All</button>
         <button className={`pill ${activeFilter === 'unpaid' ? 'pill--active' : ''}`} onClick={() => setActiveFilter('unpaid')}>Unpaid</button>
@@ -201,30 +300,51 @@ function Dashboard({ token, onLogout, email }) {
 
       <section className="card">
         <div className="section-head">
-          <h3>Room Ledger</h3>
+          <h3>Bills</h3>
           <button className="ghost-btn" onClick={sendAllReminders}>Send All Reminders</button>
         </div>
-        {filteredRooms.map((room) => (
+
+        {!billRows.length ? <p className="muted">No bills available yet.</p> : null}
+
+        {billRows.map((room) => (
           <div className="transaction-item" key={room.id}>
             <div className="transaction-icon">{room.room_number}</div>
             <div className="grow">
               <p>{room.tenant_name || 'VACANT'}</p>
-              <p className="muted">{room.latest_bill_period_start ? `${room.latest_bill_period_start} to ${room.latest_bill_period_end}` : 'No bill yet'}</p>
+              <p className="muted">{room.latest_bill_period_start} to {room.latest_bill_period_end}</p>
+              <div className="row-actions">
+                <input
+                  placeholder="Corrected Elec"
+                  value={billEditDrafts[room.id]?.electricity_reading || ''}
+                  onChange={(e) => updateBillDraft(room.id, 'electricity_reading', e.target.value)}
+                />
+                <input
+                  placeholder="Corrected Water"
+                  value={billEditDrafts[room.id]?.water_reading || ''}
+                  onChange={(e) => updateBillDraft(room.id, 'water_reading', e.target.value)}
+                />
+              </div>
+              <div className="row-actions">
+                <button className="mini-btn" onClick={() => editLatestBill(room.id)}>Edit Bill</button>
+                <button className="mini-btn" onClick={() => sendReminder(room.latest_bill_id)}>SMS</button>
+                {room.latest_bill_status !== 'paid' ? <button className="mini-btn" onClick={() => markPaid(room.latest_bill_id)}>Paid</button> : null}
+                {room.latest_bill_status === 'paid' ? <button className="mini-btn" onClick={() => markUnpaid(room.latest_bill_id)}>Unpaid</button> : null}
+              </div>
             </div>
             <div className="amount-col">
               <p className={room.latest_bill_status === 'paid' ? 'transaction-amount--positive' : 'transaction-amount--negative'}>
                 PHP {Number(room.latest_bill_total || 0).toFixed(2)}
               </p>
-              <div className="row-actions">
-                {room.latest_bill_id ? <button className="mini-btn" onClick={() => sendReminder(room.latest_bill_id)}>SMS</button> : null}
-                {room.latest_bill_id && room.latest_bill_status !== 'paid' ? <button className="mini-btn" onClick={() => markPaid(room.latest_bill_id)}>Paid</button> : null}
-                {room.latest_bill_id && room.latest_bill_status === 'paid' ? <button className="mini-btn" onClick={() => markUnpaid(room.latest_bill_id)}>Unpaid</button> : null}
-              </div>
+              <p className="muted">{String(room.latest_bill_status || 'unpaid').toUpperCase()}</p>
             </div>
           </div>
         ))}
       </section>
+    </>
+  );
 
+  const renderAdd = () => (
+    <>
       <section className="card form-card">
         <h3>Register Tenant</h3>
         <form onSubmit={submitRegister}>
@@ -250,16 +370,93 @@ function Dashboard({ token, onLogout, email }) {
           <button className="cta-btn" type="submit">Generate Bill</button>
         </form>
       </section>
+    </>
+  );
+
+  const renderStats = () => {
+    const maxAmount = Math.max(...billRows.map((room) => Number(room.latest_bill_total || 0)), 1);
+
+    return (
+      <section className="card">
+        <h3>Latest Bill Amounts by Room</h3>
+        {!billRows.length ? <p className="muted">No bill data yet.</p> : null}
+        <div className="bars-wrap">
+          {billRows.slice(0, 8).map((room) => {
+            const amount = Number(room.latest_bill_total || 0);
+            const height = Math.max(14, Math.round((amount / maxAmount) * 120));
+            return (
+              <div key={room.id} className="bar-col">
+                <div className="bar" style={{ height: `${height}px` }} />
+                <span>{room.room_number}</span>
+                <small>PHP {amount.toFixed(0)}</small>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
+  const renderTenants = () => (
+    <section className="card">
+      <h3>Tenants</h3>
+      {rooms.map((room) => (
+        <div className="tenant-edit" key={room.id}>
+          <p><b>{room.room_number}</b> - {room.tenant_name || 'VACANT'}</p>
+          <input
+            placeholder="Tenant Name"
+            value={tenantDrafts[room.id]?.tenant_name || ''}
+            onChange={(e) => updateTenantDraft(room.id, 'tenant_name', e.target.value)}
+          />
+          <input
+            placeholder="Contact Number"
+            value={tenantDrafts[room.id]?.contact_number || ''}
+            onChange={(e) => updateTenantDraft(room.id, 'contact_number', e.target.value)}
+          />
+          <input
+            placeholder="Move in Date"
+            value={tenantDrafts[room.id]?.move_in_date || ''}
+            onChange={(e) => updateTenantDraft(room.id, 'move_in_date', e.target.value)}
+          />
+          <input
+            placeholder="Room Rate"
+            value={tenantDrafts[room.id]?.room_rate ?? ''}
+            onChange={(e) => updateTenantDraft(room.id, 'room_rate', e.target.value)}
+          />
+          <div className="row-actions">
+            <button className="mini-btn" onClick={() => saveTenant(room.id)}>Save</button>
+            <button className="mini-btn" onClick={() => clearTenant(room.id)}>Clear</button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+
+  return (
+    <div className="app-shell">
+      <header className="header card">
+        <div>
+          <p className="muted">Good evening</p>
+          <h2>{email}</h2>
+        </div>
+        <button className="ghost-btn" onClick={onLogout}>Logout</button>
+      </header>
+
+      {activeTab === 'home' ? renderHome() : null}
+      {activeTab === 'bills' ? renderBills() : null}
+      {activeTab === 'add' ? renderAdd() : null}
+      {activeTab === 'stats' ? renderStats() : null}
+      {activeTab === 'tenants' ? renderTenants() : null}
 
       {message ? <p className="ok-text">{message}</p> : null}
       {error ? <p className="error-text">{error}</p> : null}
 
       <nav className="bottom-nav">
-        <button className="nav-item nav-item--active">Home</button>
-        <button className="nav-item">Bills</button>
-        <button className="nav-btn--add">+</button>
-        <button className="nav-item">Stats</button>
-        <button className="nav-item">Admin</button>
+        <button className={`nav-item ${activeTab === 'home' ? 'nav-item--active' : ''}`} onClick={() => setActiveTab('home')}>Home</button>
+        <button className={`nav-item ${activeTab === 'bills' ? 'nav-item--active' : ''}`} onClick={() => setActiveTab('bills')}>Bills</button>
+        <button className="nav-btn--add" onClick={() => setActiveTab('add')}>+</button>
+        <button className={`nav-item ${activeTab === 'stats' ? 'nav-item--active' : ''}`} onClick={() => setActiveTab('stats')}>Stats</button>
+        <button className={`nav-item ${activeTab === 'tenants' ? 'nav-item--active' : ''}`} onClick={() => setActiveTab('tenants')}>Tenants</button>
       </nav>
     </div>
   );
