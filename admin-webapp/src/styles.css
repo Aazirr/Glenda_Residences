@@ -199,7 +199,8 @@ h3,
 
 .transaction-item {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4) 0;
   border-bottom: 1px solid rgba(167, 120, 255, 0.07);
@@ -219,16 +220,36 @@ h3,
 
 .grow {
   flex: 1;
+  min-width: 200px;
+  width: 100%;
 }
 
 .amount-col {
   text-align: right;
+  width: 100%;
+  order: 3;
 }
 
 .row-actions {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: var(--space-2);
+  width: 100%;
+}
+
+.row-actions input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.row-actions button {
+  flex: 1;
+  min-width: 80px;
 }
 
 .bars-wrap {
