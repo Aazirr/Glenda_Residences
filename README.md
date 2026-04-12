@@ -24,6 +24,8 @@ Create a `.env` file from `.env.example` and set:
 - `OWNER_TELEGRAM_ID` (Telegram ID allowed to use admin commands)
 - `BOT_URL` (optional but recommended, public base URL used in PDF links)
 - `DATABASE_URL` (required on Railway for persistent Postgres)
+- `HTTPSMS_API_KEY` (required for SMS reminder integration)
+- `HTTPSMS_FROM_NUMBER` (required sender number, e.g. `+63993702805`)
 
 Example:
 
@@ -34,6 +36,8 @@ TELEGRAM_WEBHOOK_SECRET=replace_me
 OWNER_TELEGRAM_ID=6977978829
 BOT_URL=https://glenda-residences-production.up.railway.app
 DATABASE_URL=postgresql://user:password@host:port/database
+HTTPSMS_API_KEY=replace_me
+HTTPSMS_FROM_NUMBER=+63993702805
 ```
 
 ## Endpoints
@@ -85,6 +89,12 @@ DATABASE_URL=postgresql://user:password@host:port/database
   - Lists available rooms and shows payment status for the latest bill (`PAID`/`UNPAID`).
 - `/markpaid`
   - Lists available rooms, finds latest unpaid bill, and marks it as paid with optional notes.
+- `/sendremainder`
+  - Lists available rooms, selects latest unpaid bill, previews message, and sends SMS via httpSMS.
+  - Saves send result in `sms_logs` for audit and retry diagnostics.
+- `/sendremainderall`
+  - Sends reminders in bulk for latest unpaid bill per room (valid contact numbers only).
+  - Requires `SENDALL` confirmation and reports sent/failed/skipped totals.
 
 ## Billing Rules
 
@@ -150,8 +160,10 @@ Optional verification:
   - Historical meter input snapshots.
 - `bills`
   - Computed bill records per room and billing period.
+- `sms_logs`
+  - Outbound SMS reminder logs, status, provider message ID, and error details.
 
-Startup includes schema migration logic for both Postgres and SQLite, including `rooms.contact_number`, `rooms.move_in_date`, `rooms.room_rate`, and `bills.room_rate`.
+Startup includes schema migration logic for both Postgres and SQLite, including `rooms.contact_number`, `rooms.move_in_date`, `rooms.room_rate`, `bills.room_rate`, and `sms_logs`.
 Payment status columns are also migrated automatically: `bills.status`, `bills.paid_at`, `bills.payment_notes`.
 
 ## Security Notes

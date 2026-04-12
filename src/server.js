@@ -8,6 +8,8 @@ const port = process.env.PORT || 3000;
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
 const ownerTelegramId = parseInt(process.env.OWNER_TELEGRAM_ID || '0');
+const httpSmsApiKey = process.env.HTTPSMS_API_KEY;
+const httpSmsFromNumber = process.env.HTTPSMS_FROM_NUMBER;
 
 const conversationState = {};
 
@@ -140,6 +142,98 @@ function parseFlexibleDate(value) {
   return parsedDate.toISOString().slice(0, 10);
 }
 
+function normalizePhoneNumber(value) {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) {
+    return null;
+  }
+
+  let normalized = rawValue.replace(/[^\d+]/g, '');
+
+  if (normalized.startsWith('00')) {
+    normalized = `+${normalized.slice(2)}`;
+  }
+
+  if (/^09\d{9}$/.test(normalized)) {
+    return `+63${normalized.slice(1)}`;
+  }
+
+  if (/^9\d{9}$/.test(normalized)) {
+    return `+63${normalized}`;
+  }
+
+  if (/^63\d{10}$/.test(normalized)) {
+    return `+${normalized}`;
+  }
+
+  if (/^\+\d{10,15}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function buildReminderMessage(room, bill) {
+  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nPlease settle your bill. Thank you.`;
+}
+
+async function sendHttpSmsMessage({ to, content, requestId }) {
+  if (!httpSmsApiKey || !httpSmsFromNumber) {
+    throw new Error('HTTPSMS_API_KEY or HTTPSMS_FROM_NUMBER is not configured.');
+  }
+
+  const response = await fetch('https://api.httpsms.com/v1/messages/send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': httpSmsApiKey,
+    },
+    body: JSON.stringify({
+      content,
+      from: httpSmsFromNumber,
+      to,
+      request_id: requestId,
+    }),
+  });
+
+  const rawBody = await response.text();
+  let parsedBody = null;
+
+  try {
+    parsedBody = JSON.parse(rawBody);
+  } catch (error) {
+    parsedBody = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`httpSMS request failed: ${response.status} ${rawBody}`);
+  }
+
+  return {
+    providerMessageId: parsedBody?.data?.id || null,
+    providerStatus: parsedBody?.data?.status || 'queued',
+  };
+}
+
+async function logSmsAttempt(payload) {
+  await dbRun(
+    `INSERT INTO sms_logs (bill_id, room_id, to_number, from_number, content, request_id, provider_message_id, status, error_message, sent_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      payload.billId || null,
+      payload.roomId || null,
+      payload.toNumber,
+      payload.fromNumber,
+      payload.content,
+      payload.requestId || null,
+      payload.providerMessageId || null,
+      payload.status || 'pending',
+      payload.errorMessage || null,
+      payload.sentAt || null,
+    ]
+  );
+}
+
 async function getRoomsListText() {
   const rooms = await dbAll('SELECT room_number FROM rooms ORDER BY room_number ASC');
   if (!rooms.length) {
@@ -208,31 +302,31 @@ async function generateBillPDF(room, bill) {
     // Room Rate
     doc.fontSize(10).font('Helvetica-Bold').text('Room Rate', 50, 235);
     doc.fontSize(9).font('Helvetica');
-    doc.text(`Monthly Rent: ₱${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 255);
-    doc.text(`Amount: ₱${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 270, { align: 'right', width: 425 });
+    doc.text(`Monthly Rent: PHP ${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 255);
+    doc.text(`Amount: PHP ${Number(bill.room_rate || room.room_rate || 0).toFixed(2)}`, 70, 270, { align: 'right', width: 425 });
 
     // Electricity
     doc.fontSize(10).font('Helvetica-Bold').text('Electricity', 50, 300);
     doc.fontSize(9).font('Helvetica');
-    doc.text(`Consumption: ${bill.electricity_consumption.toFixed(2)} kWh @ ₱${room.electricity_rate}/kWh`, 70, 320);
-    doc.text(`Amount: ₱${bill.electricity_cost.toFixed(2)}`, 70, 335, { align: 'right', width: 425 });
+    doc.text(`Consumption: ${bill.electricity_consumption.toFixed(2)} kWh @ PHP ${room.electricity_rate}/kWh`, 70, 320);
+    doc.text(`Amount: PHP ${bill.electricity_cost.toFixed(2)}`, 70, 335, { align: 'right', width: 425 });
 
     // Water
     doc.fontSize(10).font('Helvetica-Bold').text('Water', 50, 360);
     doc.fontSize(9).font('Helvetica');
     if (bill.water_consumption > 0) {
-      doc.text(`Consumption: ${bill.water_consumption.toFixed(2)} units @ ₱${room.water_rate}/unit`, 70, 380);
+      doc.text(`Consumption: ${bill.water_consumption.toFixed(2)} units @ PHP ${room.water_rate}/unit`, 70, 380);
     } else {
       doc.text(`Fixed Monthly Rate`, 70, 380);
     }
-    doc.text(`Amount: ₱${bill.water_cost.toFixed(2)}`, 70, 395, { align: 'right', width: 425 });
+    doc.text(`Amount: PHP ${bill.water_cost.toFixed(2)}`, 70, 395, { align: 'right', width: 425 });
 
     // Divider
     doc.moveTo(50, 420).lineTo(545, 420).stroke();
 
     // Total
     doc.fontSize(14).font('Helvetica-Bold').text('TOTAL AMOUNT DUE', 50, 440);
-    doc.fontSize(14).font('Helvetica-Bold').text(`₱${bill.total_cost.toFixed(2)}`, 450, 440, { align: 'right' });
+    doc.fontSize(14).font('Helvetica-Bold').text(`PHP ${bill.total_cost.toFixed(2)}`, 450, 440, { align: 'right' });
 
     // Footer
     doc.fontSize(8).font('Helvetica').text('Thank you for your payment.', 50, 520, { align: 'center' });
@@ -650,6 +744,281 @@ async function handleMarkPaid(chatId, userText) {
 
     delete conversationState[chatId];
   }
+}
+
+async function handleSendReminder(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'send_reminder') {
+    conversationState[chatId] = { command: 'send_reminder', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room do you want to send a bill reminder to?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const bill = await dbGet(
+      "SELECT * FROM bills WHERE room_id = ? AND COALESCE(status, 'unpaid') = 'unpaid' ORDER BY created_at DESC LIMIT 1",
+      [room.id]
+    );
+
+    if (!bill) {
+      await sendTelegramMessage(chatId, `No unpaid bill found for room ${room.room_number}.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const normalizedRecipient = normalizePhoneNumber(room.contact_number);
+    if (!normalizedRecipient) {
+      await sendTelegramMessage(chatId, `Room ${room.room_number} has no valid contact number. Update it first using /updatetenant.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const messageContent = buildReminderMessage(room, bill);
+
+    state.data.room = room;
+    state.data.bill = bill;
+    state.data.toNumber = normalizedRecipient;
+    state.data.content = messageContent;
+    state.step = 2;
+
+    await sendTelegramMessage(
+      chatId,
+      `<b>Reminder preview</b>\nTo: ${normalizedRecipient}\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost).toFixed(2)}\n\n${messageContent}\n\nType SEND to continue.`
+    );
+    return;
+  }
+
+  if (state.step === 2) {
+    const confirmation = String(userText || '').trim().toUpperCase();
+    if (confirmation !== 'SEND') {
+      await sendTelegramMessage(chatId, 'Reminder send cancelled. No SMS was sent.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    const requestId = `bill-${state.data.bill.id}-${Date.now()}`;
+    const normalizedFromNumber = normalizePhoneNumber(httpSmsFromNumber || '');
+
+    try {
+      const result = await sendHttpSmsMessage({
+        to: state.data.toNumber,
+        content: state.data.content,
+        requestId,
+      });
+
+      await logSmsAttempt({
+        billId: state.data.bill.id,
+        roomId: state.data.room.id,
+        toNumber: state.data.toNumber,
+        fromNumber: normalizedFromNumber || String(httpSmsFromNumber || ''),
+        content: state.data.content,
+        requestId,
+        providerMessageId: result.providerMessageId,
+        status: result.providerStatus || 'queued',
+        sentAt: new Date().toISOString(),
+      });
+
+      await sendTelegramMessage(
+        chatId,
+        `✅ SMS reminder queued successfully.\nRoom: ${state.data.room.room_number}\nTo: ${state.data.toNumber}\nMessage ID: ${result.providerMessageId || 'N/A'}`
+      );
+    } catch (error) {
+      console.error('Send reminder error:', error);
+
+      try {
+        await logSmsAttempt({
+          billId: state.data.bill.id,
+          roomId: state.data.room.id,
+          toNumber: state.data.toNumber,
+          fromNumber: normalizedFromNumber || String(httpSmsFromNumber || ''),
+          content: state.data.content,
+          requestId,
+          status: 'failed',
+          errorMessage: String(error.message || error),
+        });
+      } catch (logError) {
+        console.error('SMS log save error:', logError);
+      }
+
+      await sendTelegramMessage(chatId, `Failed to send SMS reminder. ${String(error.message || error)}`);
+    }
+
+    delete conversationState[chatId];
+  }
+}
+
+async function handleSendReminderAll(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'send_reminder_all') {
+    const unpaidRows = await dbAll(
+      `SELECT
+        r.id AS room_id,
+        r.room_number,
+        r.tenant_name,
+        r.contact_number,
+        b.id AS bill_id,
+        b.period_start,
+        b.period_end,
+        b.total_cost
+       FROM rooms r
+       INNER JOIN bills b ON b.room_id = r.id
+       WHERE COALESCE(b.status, 'unpaid') = 'unpaid'
+         AND b.created_at = (
+           SELECT MAX(b2.created_at)
+           FROM bills b2
+           WHERE b2.room_id = r.id
+             AND COALESCE(b2.status, 'unpaid') = 'unpaid'
+         )
+       ORDER BY r.room_number ASC`
+    );
+
+    if (!unpaidRows.length) {
+      await sendTelegramMessage(chatId, 'No unpaid bills found.');
+      delete conversationState[chatId];
+      return;
+    }
+
+    const validCandidates = [];
+    const skippedRooms = [];
+
+    for (const row of unpaidRows) {
+      const toNumber = normalizePhoneNumber(row.contact_number);
+      if (!toNumber) {
+        skippedRooms.push(`${row.room_number} (invalid/missing contact)`);
+        continue;
+      }
+
+      validCandidates.push({
+        roomId: row.room_id,
+        roomNumber: row.room_number,
+        tenantName: row.tenant_name,
+        billId: row.bill_id,
+        periodStart: row.period_start,
+        periodEnd: row.period_end,
+        totalCost: Number(row.total_cost || 0),
+        toNumber,
+      });
+    }
+
+    if (!validCandidates.length) {
+      const skippedText = skippedRooms.length ? `\nSkipped: ${skippedRooms.join(', ')}` : '';
+      await sendTelegramMessage(chatId, `No valid recipients found for unpaid bills.${skippedText}`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    conversationState[chatId] = {
+      command: 'send_reminder_all',
+      step: 1,
+      data: {
+        validCandidates,
+        skippedRooms,
+      },
+    };
+
+    await sendTelegramMessage(
+      chatId,
+      `<b>Bulk reminder preview</b>\nRecipients: ${validCandidates.length}\n${skippedRooms.length ? `Skipped: ${skippedRooms.length}\n` : ''}Type SENDALL to send reminders now.`
+    );
+    return;
+  }
+
+  const state = conversationState[chatId];
+  if (state.step !== 1) {
+    delete conversationState[chatId];
+    await sendTelegramMessage(chatId, 'Bulk reminder flow reset. Please run /sendremainderall again.');
+    return;
+  }
+
+  const confirmation = String(userText || '').trim().toUpperCase();
+  if (confirmation !== 'SENDALL') {
+    await sendTelegramMessage(chatId, 'Bulk reminder send cancelled. No SMS was sent.');
+    delete conversationState[chatId];
+    return;
+  }
+
+  const normalizedFromNumber = normalizePhoneNumber(httpSmsFromNumber || '') || String(httpSmsFromNumber || '');
+  const sendResults = {
+    sent: 0,
+    failed: 0,
+  };
+  const failedRooms = [];
+
+  for (const candidate of state.data.validCandidates) {
+    const messageContent = buildReminderMessage(
+      { room_number: candidate.roomNumber },
+      {
+        total_cost: candidate.totalCost,
+        period_start: candidate.periodStart,
+        period_end: candidate.periodEnd,
+      }
+    );
+    const requestId = `bulk-bill-${candidate.billId}-${Date.now()}-${candidate.roomId}`;
+
+    try {
+      const result = await sendHttpSmsMessage({
+        to: candidate.toNumber,
+        content: messageContent,
+        requestId,
+      });
+
+      await logSmsAttempt({
+        billId: candidate.billId,
+        roomId: candidate.roomId,
+        toNumber: candidate.toNumber,
+        fromNumber: normalizedFromNumber,
+        content: messageContent,
+        requestId,
+        providerMessageId: result.providerMessageId,
+        status: result.providerStatus || 'queued',
+        sentAt: new Date().toISOString(),
+      });
+
+      sendResults.sent += 1;
+    } catch (error) {
+      sendResults.failed += 1;
+      failedRooms.push(candidate.roomNumber);
+
+      try {
+        await logSmsAttempt({
+          billId: candidate.billId,
+          roomId: candidate.roomId,
+          toNumber: candidate.toNumber,
+          fromNumber: normalizedFromNumber,
+          content: messageContent,
+          requestId,
+          status: 'failed',
+          errorMessage: String(error.message || error),
+        });
+      } catch (logError) {
+        console.error('Bulk SMS log save error:', logError);
+      }
+    }
+  }
+
+  const skippedRooms = state.data.skippedRooms || [];
+  await sendTelegramMessage(
+    chatId,
+    `✅ Bulk reminder run completed.\nSent: ${sendResults.sent}\nFailed: ${sendResults.failed}\nSkipped (invalid contact): ${skippedRooms.length}${failedRooms.length ? `\nFailed rooms: ${failedRooms.join(', ')}` : ''}${skippedRooms.length ? `\nSkipped rooms: ${skippedRooms.join(', ')}` : ''}`
+  );
+
+  delete conversationState[chatId];
 }
 
 async function handleUpdateTenant(chatId, userText) {
@@ -1198,7 +1567,7 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/start') {
-    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /updatetenant, /deletetenant, /transfertenant, /inputreading, /editreading, /viewbill, /paymentstatus, /markpaid, /cancel');
+    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /updatetenant, /deletetenant, /transfertenant, /inputreading, /editreading, /viewbill, /paymentstatus, /markpaid, /sendremainder, /sendremainderall, /cancel');
     return;
   }
 
@@ -1256,6 +1625,16 @@ async function handleTelegramUpdate(update) {
     return;
   }
 
+  if (text === '/sendremainder') {
+    await handleSendReminder(chatId, null);
+    return;
+  }
+
+  if (text === '/sendremainderall') {
+    await handleSendReminderAll(chatId, null);
+    return;
+  }
+
   if (text === '/editreading') {
     await handleEditReading(chatId, null);
     return;
@@ -1275,6 +1654,10 @@ async function handleTelegramUpdate(update) {
     await handleMarkPaid(chatId, text);
   } else if (conversationState[chatId]?.command === 'update_tenant') {
     await handleUpdateTenant(chatId, text);
+  } else if (conversationState[chatId]?.command === 'send_reminder') {
+    await handleSendReminder(chatId, text);
+  } else if (conversationState[chatId]?.command === 'send_reminder_all') {
+    await handleSendReminderAll(chatId, text);
   } else if (conversationState[chatId]?.command === 'delete_tenant') {
     await handleDeleteTenant(chatId, text);
   } else if (conversationState[chatId]?.command === 'transfer_tenant') {

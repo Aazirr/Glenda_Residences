@@ -69,6 +69,23 @@ function createPostgresAdapter() {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sms_logs (
+        id SERIAL PRIMARY KEY,
+        bill_id INTEGER REFERENCES bills(id),
+        room_id INTEGER REFERENCES rooms(id),
+        to_number TEXT NOT NULL,
+        from_number TEXT NOT NULL,
+        content TEXT NOT NULL,
+        request_id TEXT,
+        provider_message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error_message TEXT,
+        sent_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS contact_number TEXT');
     await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS move_in_date TEXT');
     await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_rate REAL NOT NULL DEFAULT 0');
@@ -76,6 +93,17 @@ function createPostgresAdapter() {
     await pool.query("ALTER TABLE bills ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'unpaid'");
     await pool.query('ALTER TABLE bills ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP NULL');
     await pool.query('ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_notes TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS bill_id INTEGER');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS room_id INTEGER');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS to_number TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS from_number TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS content TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS request_id TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS provider_message_id TEXT');
+    await pool.query("ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'");
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS error_message TEXT');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP NULL');
+    await pool.query('ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
     await pool.query("UPDATE bills SET status = 'unpaid' WHERE status IS NULL OR status = ''");
   }
 
@@ -195,6 +223,25 @@ function createSqliteAdapter() {
         )
       `);
 
+      db.run(`
+        CREATE TABLE IF NOT EXISTS sms_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          bill_id INTEGER,
+          room_id INTEGER,
+          to_number TEXT NOT NULL,
+          from_number TEXT NOT NULL,
+          content TEXT NOT NULL,
+          request_id TEXT,
+          provider_message_id TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          error_message TEXT,
+          sent_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (bill_id) REFERENCES bills(id),
+          FOREIGN KEY (room_id) REFERENCES rooms(id)
+        )
+      `);
+
       migrateSqliteTables();
     });
   }
@@ -245,6 +292,59 @@ function createSqliteAdapter() {
         }
 
         db.run("UPDATE bills SET status = 'unpaid' WHERE status IS NULL OR status = ''");
+
+        db.all('PRAGMA table_info(sms_logs)', (smsErr, smsColumns) => {
+          if (smsErr) {
+            console.error('Schema migration error (sms_logs):', smsErr);
+            return;
+          }
+
+          const smsColumnNames = new Set(smsColumns.map((col) => col.name));
+
+          if (!smsColumnNames.has('bill_id')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN bill_id INTEGER');
+          }
+
+          if (!smsColumnNames.has('room_id')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN room_id INTEGER');
+          }
+
+          if (!smsColumnNames.has('to_number')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN to_number TEXT');
+          }
+
+          if (!smsColumnNames.has('from_number')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN from_number TEXT');
+          }
+
+          if (!smsColumnNames.has('content')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN content TEXT');
+          }
+
+          if (!smsColumnNames.has('request_id')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN request_id TEXT');
+          }
+
+          if (!smsColumnNames.has('provider_message_id')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN provider_message_id TEXT');
+          }
+
+          if (!smsColumnNames.has('status')) {
+            db.run("ALTER TABLE sms_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+          }
+
+          if (!smsColumnNames.has('error_message')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN error_message TEXT');
+          }
+
+          if (!smsColumnNames.has('sent_at')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN sent_at DATETIME');
+          }
+
+          if (!smsColumnNames.has('created_at')) {
+            db.run('ALTER TABLE sms_logs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP');
+          }
+        });
       });
     });
   }
