@@ -174,7 +174,11 @@ function normalizePhoneNumber(value) {
 }
 
 function buildReminderMessage(room, bill) {
-  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nPlease settle your bill. Thank you.`;
+  const filename = generateBillFilename(room.room_number, bill.id);
+  const baseUrl = process.env.BOT_URL || 'https://glenda-residences-production.up.railway.app';
+  const pdfUrl = `${baseUrl}/bills/${encodeURIComponent(filename)}`;
+
+  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nBill PDF: ${pdfUrl}\nPlease settle your bill. Thank you.`;
 }
 
 async function sendHttpSmsMessage({ to, content, requestId }) {
@@ -746,6 +750,66 @@ async function handleMarkPaid(chatId, userText) {
   }
 }
 
+async function handleMarkUnpaid(chatId, userText) {
+  if (!conversationState[chatId] || conversationState[chatId].command !== 'mark_unpaid') {
+    conversationState[chatId] = { command: 'mark_unpaid', step: 1, data: {} };
+    const roomsText = await getRoomsListText();
+    if (!roomsText) {
+      await sendTelegramMessage(chatId, 'No rooms found yet. Register a tenant first using /registertenant.');
+      delete conversationState[chatId];
+      return;
+    }
+    await sendTelegramMessage(chatId, `<b>Available rooms:</b>\n${roomsText}\n\nWhich room do you want to mark as unpaid?`);
+    return;
+  }
+
+  const state = conversationState[chatId];
+
+  if (state.step === 1) {
+    const normalizedRoomNumber = normalizeRoomNumber(userText);
+    const room = await dbGet('SELECT * FROM rooms WHERE UPPER(room_number) = ?', [normalizedRoomNumber]);
+    if (!room) {
+      await sendTelegramMessage(chatId, `Room ${normalizedRoomNumber} not found.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    const paidBill = await dbGet(
+      "SELECT * FROM bills WHERE room_id = ? AND COALESCE(status, 'unpaid') = 'paid' ORDER BY created_at DESC LIMIT 1",
+      [room.id]
+    );
+
+    if (!paidBill) {
+      await sendTelegramMessage(chatId, `No paid bill found for room ${room.room_number}.`);
+      delete conversationState[chatId];
+      return;
+    }
+
+    state.data.room = room;
+    state.data.bill = paidBill;
+    state.step = 2;
+    await sendTelegramMessage(chatId, `Paid bill found for room ${room.room_number} (₱${paidBill.total_cost.toFixed(2)}).\n\nEnter undo notes, or type '-' to skip.`);
+    return;
+  }
+
+  if (state.step === 2) {
+    const notes = String(userText || '').trim();
+    const undoNotes = notes === '-' ? null : notes;
+
+    await dbRun(
+      "UPDATE bills SET status = 'unpaid', paid_at = NULL, payment_notes = ? WHERE id = ?",
+      [undoNotes, state.data.bill.id]
+    );
+
+    await sendTelegramMessage(
+      chatId,
+      `↩️ Bill marked as UNPAID.\nRoom: ${state.data.room.room_number}\nAmount: ₱${state.data.bill.total_cost.toFixed(2)}\n${undoNotes ? `Notes: ${undoNotes}` : ''}`
+    );
+
+    delete conversationState[chatId];
+  }
+}
+
 async function handleSendReminder(chatId, userText) {
   if (!conversationState[chatId] || conversationState[chatId].command !== 'send_reminder') {
     conversationState[chatId] = { command: 'send_reminder', step: 1, data: {} };
@@ -964,6 +1028,7 @@ async function handleSendReminderAll(chatId, userText) {
     const messageContent = buildReminderMessage(
       { room_number: candidate.roomNumber },
       {
+        id: candidate.billId,
         total_cost: candidate.totalCost,
         period_start: candidate.periodStart,
         period_end: candidate.periodEnd,
@@ -1567,7 +1632,7 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/start') {
-    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /updatetenant, /deletetenant, /transfertenant, /inputreading, /editreading, /viewbill, /paymentstatus, /markpaid, /sendremainder, /sendremainderall, /cancel');
+    await sendTelegramMessage(chatId, 'Glenda Residences bot online.\n\nCommands: /registertenant, /updatetenant, /deletetenant, /transfertenant, /inputreading, /editreading, /viewbill, /paymentstatus, /markpaid, /markunpaid, /sendremainder, /sendremainderall, /cancel');
     return;
   }
 
@@ -1625,6 +1690,11 @@ async function handleTelegramUpdate(update) {
     return;
   }
 
+  if (text === '/markunpaid') {
+    await handleMarkUnpaid(chatId, null);
+    return;
+  }
+
   if (text === '/sendremainder') {
     await handleSendReminder(chatId, null);
     return;
@@ -1652,6 +1722,8 @@ async function handleTelegramUpdate(update) {
     delete conversationState[chatId];
   } else if (conversationState[chatId]?.command === 'mark_paid') {
     await handleMarkPaid(chatId, text);
+  } else if (conversationState[chatId]?.command === 'mark_unpaid') {
+    await handleMarkUnpaid(chatId, text);
   } else if (conversationState[chatId]?.command === 'update_tenant') {
     await handleUpdateTenant(chatId, text);
   } else if (conversationState[chatId]?.command === 'send_reminder') {

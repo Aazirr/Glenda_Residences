@@ -89,6 +89,8 @@ HTTPSMS_FROM_NUMBER=+63993702805
   - Lists available rooms and shows payment status for the latest bill (`PAID`/`UNPAID`).
 - `/markpaid`
   - Lists available rooms, finds latest unpaid bill, and marks it as paid with optional notes.
+- `/markunpaid`
+  - Lists available rooms, finds latest paid bill, and marks it as unpaid to undo mistakes.
 - `/sendremainder`
   - Lists available rooms, selects latest unpaid bill, previews message, and sends SMS via httpSMS.
   - Saves send result in `sms_logs` for audit and retry diagnostics.

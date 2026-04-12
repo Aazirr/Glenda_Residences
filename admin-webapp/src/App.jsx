@@ -157,6 +157,7 @@ function Dashboard({ token, onLogout, email }) {
   };
 
   const markPaid = async (billId) => runAction(() => apiRequest(`/api/bills/${billId}/mark-paid`, { method: 'POST', body: JSON.stringify({ notes: 'Paid via admin webapp' }) }, token));
+  const markUnpaid = async (billId) => runAction(() => apiRequest(`/api/bills/${billId}/mark-unpaid`, { method: 'POST', body: JSON.stringify({ notes: 'Unpaid via admin webapp' }) }, token));
   const sendReminder = async (billId) => runAction(() => apiRequest(`/api/bills/${billId}/send-reminder`, { method: 'POST' }, token));
   const sendAllReminders = async () => runAction(() => apiRequest('/api/bills/send-reminder-all', { method: 'POST' }, token));
 
@@ -217,6 +218,7 @@ function Dashboard({ token, onLogout, email }) {
               <div className="row-actions">
                 {room.latest_bill_id ? <button className="mini-btn" onClick={() => sendReminder(room.latest_bill_id)}>SMS</button> : null}
                 {room.latest_bill_id && room.latest_bill_status !== 'paid' ? <button className="mini-btn" onClick={() => markPaid(room.latest_bill_id)}>Paid</button> : null}
+                {room.latest_bill_id && room.latest_bill_status === 'paid' ? <button className="mini-btn" onClick={() => markUnpaid(room.latest_bill_id)}>Unpaid</button> : null}
               </div>
             </div>
           </div>

@@ -26,6 +26,7 @@ const adminPassword = process.env.ADMIN_PASSWORD || '';
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || '';
 const httpSmsApiKey = process.env.HTTPSMS_API_KEY || '';
 const httpSmsFromNumber = process.env.HTTPSMS_FROM_NUMBER || '';
+const botUrl = process.env.BOT_URL || '';
 
 app.use(cors());
 app.use(express.json());
@@ -84,8 +85,16 @@ function normalizePhoneNumber(value) {
   return null;
 }
 
+function generateBillFilename(roomNumber, billId) {
+  return `bill_${String(roomNumber || '').replace(/\//g, '_')}_${billId}.pdf`;
+}
+
 function buildReminderMessage(room, bill) {
-  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nPlease settle your bill. Thank you.`;
+  const filename = generateBillFilename(room.room_number, bill.id);
+  const pdfUrl = botUrl ? `${botUrl}/bills/${encodeURIComponent(filename)}` : null;
+  const pdfLine = pdfUrl ? `\nBill PDF: ${pdfUrl}` : '';
+
+  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID${pdfLine}\nPlease settle your bill. Thank you.`;
 }
 
 async function logSmsAttempt(payload) {
@@ -556,6 +565,27 @@ app.post('/api/bills/:billId/mark-paid', authMiddleware, async (req, res) => {
   try {
     await db.query(
       "UPDATE bills SET status = 'paid', paid_at = CURRENT_TIMESTAMP, payment_notes = $1 WHERE id = $2",
+      [notes || null, billId]
+    );
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/bills/:billId/mark-unpaid', authMiddleware, async (req, res) => {
+  const billId = Number(req.params.billId);
+  const notes = String(req.body?.notes || '').trim();
+
+  if (!billId) {
+    res.status(400).json({ error: 'Invalid bill id.' });
+    return;
+  }
+
+  try {
+    await db.query(
+      "UPDATE bills SET status = 'unpaid', paid_at = NULL, payment_notes = $1 WHERE id = $2",
       [notes || null, billId]
     );
 
