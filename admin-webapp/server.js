@@ -90,11 +90,7 @@ function generateBillFilename(roomNumber, billId) {
 }
 
 function buildReminderMessage(room, bill) {
-  const filename = generateBillFilename(room.room_number, bill.id);
-  const pdfUrl = botUrl ? `${botUrl}/bills/${encodeURIComponent(filename)}` : null;
-  const pdfLine = pdfUrl ? `\nBill PDF: ${pdfUrl}` : '';
-
-  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID${pdfLine}\nPlease settle your bill. Thank you.`;
+  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nPlease settle your bill. Thank you.`;
 }
 
 async function logSmsAttempt(payload) {

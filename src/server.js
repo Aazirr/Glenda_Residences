@@ -174,11 +174,7 @@ function normalizePhoneNumber(value) {
 }
 
 function buildReminderMessage(room, bill) {
-  const filename = generateBillFilename(room.room_number, bill.id);
-  const baseUrl = process.env.BOT_URL || 'https://glenda-residences-production.up.railway.app';
-  const pdfUrl = `${baseUrl}/bills/${encodeURIComponent(filename)}`;
-
-  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nBill PDF: ${pdfUrl}\nPlease settle your bill. Thank you.`;
+  return `Glenda Residences Reminder\nRoom: ${room.room_number}\nAmount Due: PHP ${Number(bill.total_cost || 0).toFixed(2)}\nBilling Period: ${bill.period_start} to ${bill.period_end}\nStatus: UNPAID\nPlease settle your bill. Thank you.`;
 }
 
 async function sendHttpSmsMessage({ to, content, requestId }) {
