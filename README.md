@@ -137,6 +137,12 @@ Default local URL:
   - `DATABASE_URL` (from your Railway Postgres service)
 4. Deploy.
 
+Admin webapp service:
+
+- A separate React + Express admin service is available under `admin-webapp/`.
+- Deploy it as an additional Railway service and point it to the same `DATABASE_URL`.
+- See `admin-webapp/README.md` for variables and commands.
+
 Important:
 
 - Railway filesystem is ephemeral, so SQLite files reset on deploy.
